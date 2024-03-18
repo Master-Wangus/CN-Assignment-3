@@ -396,4 +396,4 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
-code/main/.vs/CN Assignment 3/v17/.suo
+/code/main/.vs/CN Assignment 3/v17
