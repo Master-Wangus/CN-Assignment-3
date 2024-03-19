@@ -6,6 +6,14 @@
 
 namespace Utils
 {
+	/*!***********************************************************************
+	\brief
+	Changes the message length in network order to its string representation in hex form through binary manipulation.
+	\param[in, out] long
+	the long that is the message length to be converted to string
+	\return
+	The string representing the message length in network order
+	*************************************************************************/
 	std::string htonlToString(u_long input)
 	{
 		std::string output(sizeof(unsigned long), '\0'); // Initialize string with the size of u_long, filled with '\0'
@@ -32,6 +40,26 @@ namespace Utils
 		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
 		return ntohs(ret);
 	}
+
+	/*!***********************************************************************
+	\brief
+	Converts a hex string into human readable string
+	\param[in, out] inputstring
+	the hex string to be converted
+	\return
+	the human readable string
+	*************************************************************************/
+	std::string HexToString(const std::string& inputstring) {
+		std::string output{};
+		for (size_t i = 0; i < inputstring.length(); i += 2) {
+			std::string byteString = inputstring.substr(i, 2);
+			//convert to unsigned long in hex format then cast to char
+			char byte = static_cast<char>(std::stoul(byteString, nullptr, 16));
+			output.push_back(byte); //append to message
+		}
+		return output;
+	}
+
 	std::filesystem::path OpenFolder()
 	{
 		std::filesystem::path value;

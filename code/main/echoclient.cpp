@@ -38,27 +38,8 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 
 #include "Utils.h"			// helper file
 
-
-/*!***********************************************************************
-\brief
-Converts a hex string into human readable string
-\param[in, out] inputstring
-the hex string to be converted
-\return
-the human readable string
-*************************************************************************/
-std::string HexToString(const std::string& inputstring) {
-	std::string output{};
-	for (size_t i = 0; i < inputstring.length(); i += 2) {
-		std::string byteString = inputstring.substr(i, 2);
-		//convert to unsigned long in hex format then cast to char
-		char byte = static_cast<char>(std::stoul(byteString, nullptr, 16));
-		output.push_back(byte); //append to message
-	}
-	return output;
-}
-
-void receive(SOCKET);
+// forward declarations
+void receive(SOCKET,SOCKET);
 
 enum CMDID {
 	UNKNOWN = (unsigned char)0x0,//not used
@@ -80,19 +61,15 @@ int main(int argc, char** argv)
 	std::string host{}, TCPServer{}, UDPServer, UDPClient, downloadPath{};
 	std::cout << "Server IP Address: ";
 	std::cin >> host;
-	std::cout << std::endl;
+	std::cin.clear();
 
 	std::cout << "Server TCP Port Number: ";
 	std::cin >> TCPServer;
-	std::cout << std::endl;
+	std::cin.clear();
 
 	std::cout << "Server UDP Port Number: ";
 	std::cin >> UDPServer;
-	std::cout << std::endl;
-
-	std::cout << "Client UDP Port Number: ";
-	std::cin >> UDPClient;
-	std::cout << std::endl;
+	std::cin.clear();
 
 	std::cout << "Path to store files: ";
 	std::cin >> downloadPath;
@@ -127,23 +104,29 @@ int main(int argc, char** argv)
 	// -------------------------------------------------------------------------
 
 	// Object hints indicates which protocols to use to fill in the info.
-	addrinfo hints{};
-	SecureZeroMemory(&hints, sizeof(hints));
-	hints.ai_family = AF_INET;			// IPv4
-	hints.ai_socktype = SOCK_STREAM;	// Reliable delivery
+	addrinfo TCPhints{};
+	SecureZeroMemory(&TCPhints, sizeof(TCPhints));
+	TCPhints.ai_family = AF_INET;			// IPv4
+	TCPhints.ai_socktype = SOCK_STREAM;	// Reliable delivery
 	// Could be 0 to autodetect, but reliable delivery over IPv4 is always TCP.
-	hints.ai_protocol = IPPROTO_TCP;	// TCP
+	TCPhints.ai_protocol = IPPROTO_TCP;	// TCP
+
+	// UDP hints
+	addrinfo UDPhints{};
+	SecureZeroMemory(&UDPhints, sizeof(UDPhints));
+	UDPhints.ai_family = AF_INET;			// IPv4
+	UDPhints.ai_socktype = SOCK_DGRAM;	// Unreliable delivery
+	UDPhints.ai_protocol = IPPROTO_UDP;	// TCP
 
 
-	addrinfo* info = nullptr;
-	errorCode = getaddrinfo(host.c_str(), TCPServer.c_str(), &hints, &info);
-	if ((errorCode) || (info == nullptr))
+	addrinfo* TCPinfo = nullptr;
+	errorCode = getaddrinfo(host.c_str(), TCPServer.c_str(), &TCPhints, &TCPinfo);
+	if ((errorCode) || (TCPinfo == nullptr))
 	{
 		std::cerr << "getaddrinfo() failed." << std::endl;
 		WSACleanup();
 		return errorCode;
 	}
-
 
 	// -------------------------------------------------------------------------
 	// Create a socket and attempt to connect to the first resolved address.
@@ -152,31 +135,77 @@ int main(int argc, char** argv)
 	// connect()
 	// -------------------------------------------------------------------------
 
-	SOCKET clientSocket = socket(
-		info->ai_family,
-		info->ai_socktype,
-		info->ai_protocol);
-	if (clientSocket == INVALID_SOCKET)
+	SOCKET TCPSocket = socket(
+		TCPinfo->ai_family,
+		TCPinfo->ai_socktype,
+		TCPinfo->ai_protocol);
+	if (TCPSocket == INVALID_SOCKET)
 	{
 		std::cerr << "socket() failed." << std::endl;
-		freeaddrinfo(info);
+		freeaddrinfo(TCPinfo);
 		WSACleanup();
 		return 2;
 	}
 
 	errorCode = connect(
-		clientSocket,
-		info->ai_addr,
-		static_cast<int>(info->ai_addrlen));
+		TCPSocket,
+		TCPinfo->ai_addr,
+		static_cast<int>(TCPinfo->ai_addrlen));
 	if (errorCode == SOCKET_ERROR)
 	{
 		std::cerr << "connect() failed." << std::endl;
-		freeaddrinfo(info);
-		closesocket(clientSocket);
+		freeaddrinfo(TCPinfo);
+		closesocket(TCPSocket);
 		WSACleanup();
 		return 3;
 	}
 
+
+	// -------------------------------------------------------------------------
+	// Get clients UDP socket
+	//
+	// getaddrinfo()
+	// -------------------------------------------------------------------------
+
+	addrinfo* UDPinfo = nullptr;
+	errorCode = getaddrinfo(host.c_str(), UDPServer.c_str(), &UDPhints, &UDPinfo);
+	if ((errorCode) || (UDPinfo == nullptr))
+	{
+		std::cerr << "getaddrinfo() failed." << std::endl;
+		WSACleanup();
+		return errorCode;
+	}
+
+	SOCKET UDPsocket = socket(
+		UDPinfo->ai_family,
+		UDPinfo->ai_socktype,
+		UDPinfo->ai_protocol);
+	if (UDPsocket == INVALID_SOCKET)
+	{
+		std::cerr << "socket() failed." << std::endl;
+		freeaddrinfo(UDPinfo);
+		WSACleanup();
+		return 2;
+	}
+
+	errorCode = bind(
+		UDPsocket,
+		UDPinfo->ai_addr,
+		static_cast<int>(UDPinfo->ai_addrlen));
+	if (errorCode != NO_ERROR)
+	{
+		std::cerr << "bind() failed." << std::endl;
+		freeaddrinfo(UDPinfo);
+		closesocket(UDPsocket);
+		UDPsocket = INVALID_SOCKET;
+	}
+
+	
+	// printing of udp port number (need testing)
+	sockaddr_in* clientIPv4 = (sockaddr_in*)&UDPinfo;
+	std::cout << "Client UDP Port Number: ";
+	std::cout << clientIPv4->sin_port;
+	std::cout << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Send some text.
@@ -186,7 +215,7 @@ int main(int argc, char** argv)
 
 	// as specified in brief for quit and echo 
 	 //uint8_t QUITID = 01, ECHOID = 02;
-	 std::thread receiver(receive, clientSocket);
+	 std::thread receiver(receive, TCPSocket, UDPsocket);
 	 constexpr size_t BUFFER_SIZE = 1000;
 	 std::string input{};
 	 bool first = true, quit = false; //check if first iteration as it will always be an empty input in the first iteration
@@ -220,7 +249,7 @@ int main(int argc, char** argv)
 			std::istringstream iss{ input }; 
 			std::string IPPortPair{}, portNum{}, filePath{};
 			iss >> IPPortPair; //get IP and port number as a pair
-			std::string IP{ IPPortPair.substr(0, IPPortPair.find(':')) }; //parse them to ip and port number
+			std::string IP{ IPPortPair.substr(0, IPPortPair.find(':')) }; //parse them to ip and UDP port number
 			input = input.substr(input.find(':') + 1); //get the message, getting rid of 1 space meant to distinguish the port number and message. All preceding spaces are included in the message
 			for (size_t i{}; i < input.size(); ++i) //get the port number. Some weird edge case to do it like this
 			{
@@ -249,7 +278,7 @@ int main(int argc, char** argv)
 		}
 
  		// send 		
- 		int bytesSent = send(clientSocket, output.c_str(), static_cast<int>(output.length()), 0); //send the message out
+ 		int bytesSent = send(TCPSocket, output.c_str(), static_cast<int>(output.length()), 0); //send the message out
  		if (bytesSent == SOCKET_ERROR) //check for error
  		{
 			int errorCode = WSAGetLastError();
@@ -260,37 +289,40 @@ int main(int argc, char** argv)
 	 }
 
 	 receiver.join();
-	 errorCode = shutdown(clientSocket, SD_SEND); //shutdown by telling it to close off from reading and writing
+	 errorCode = shutdown(TCPSocket, SD_SEND); //shutdown by telling it to close off from reading and writing
 	 if (errorCode == SOCKET_ERROR) //error checking
 	 {
 		 std::cerr << "shutdown() failed." << std::endl;
 	 }
-	 closesocket(clientSocket); //close socket fr
+
+	 closesocket(UDPsocket);
+	 closesocket(TCPSocket); //close socket fr
 	 CoUninitialize();
 	WSACleanup(); //goodnight 
 }
 
-void receive(SOCKET clientSocket) {
+void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 	while (true) 
 	{
-		// receiving text
-		constexpr size_t BUFFER_SIZE = 1000;
-		char buffer[BUFFER_SIZE]{};
-		const int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0); //receive echo'ed text and header information
+		// receiving TCP
+		constexpr size_t BUFFER_SIZE_TCP = 1000;
+		char buffer_TCP[BUFFER_SIZE_TCP]{};
+		const int bytesReceived_TCP = recv(TCPsocket, buffer_TCP, BUFFER_SIZE_TCP - 1, 0); //receive echo'ed text and header information
+
 		std::string message{};
-		if (bytesReceived == SOCKET_ERROR) //check for error
+		if (bytesReceived_TCP == SOCKET_ERROR) //check for error
 		{
 			std::cerr << "recv() failed." << std::endl;
 			break;
 		}
-		else if (bytesReceived == 0) //check if not receiving any messages
+		else if (bytesReceived_TCP == 0) //check if not receiving any messages
 		{
 			break;
 		}
 		else //receiving messages from server. to process
 		{
-			buffer[bytesReceived] = '\0';
-			std::string text(buffer, bytesReceived);
+			buffer_TCP[bytesReceived_TCP] = '\0';
+			std::string text(buffer_TCP, bytesReceived_TCP);
 
 			if (text[0] == RSP_DOWNLOAD) // request echo from server, to send back message with response echo code
 			{
@@ -301,6 +333,25 @@ void receive(SOCKET clientSocket) {
 
 
 				/// INSERT UDP HERE
+				while (true)
+				{
+					constexpr size_t BUFFER_SIZE_UDP = 1000;
+					char buffer_UDP[BUFFER_SIZE_UDP]{};
+					const int bytesRecieved_UDP = recv(UDPsocket, buffer_UDP, BUFFER_SIZE_UDP, 0);
+
+					if (bytesRecieved_UDP == SOCKET_ERROR)
+					{
+
+					}
+					else if (bytesRecieved_UDP == 0) //check if not receiving any messages
+					{
+						break;
+					}
+					else // recieved valid message
+					{
+
+					}
+				}
 				//char str[INET_ADDRSTRLEN];
 				//if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
 				//{
