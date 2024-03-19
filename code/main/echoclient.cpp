@@ -94,15 +94,16 @@ std::string HexToString(const std::string& inputstring) {
 void receive(SOCKET);
 
 enum CMDID {
-	UNKNOWN = (unsigned char)0x0,
+	UNKNOWN = (unsigned char)0x0,//not used
 	REQ_QUIT = (unsigned char)0x1,
-	REQ_ECHO = (unsigned char)0x2,
-	RSP_ECHO = (unsigned char)0x3,
-	REQ_LISTUSERS = (unsigned char)0x4,
-	RSP_LISTUSERS = (unsigned char)0x5,
-	CMD_TEST = (unsigned char)0x20,
-	ECHO_ERROR = (unsigned char)0x30
+	REQ_DOWNLOAD = (unsigned char)0x2,
+	RSP_DOWNLOAD = (unsigned char)0x3,
+	REQ_LISTFILES = (unsigned char)0x4,
+	RSP_LISTFILES = (unsigned char)0x5,
+	CMD_TEST = (unsigned char)0x20,//not used
+	DOWNLOAD_ERROR = (unsigned char)0x30
 };
+
 
 // This program requires one extra command-line parameter: a server hostname.
 int main(int argc, char** argv)

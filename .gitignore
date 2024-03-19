@@ -397,3 +397,4 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 /code/main/.vs/CN Assignment 3/v17
+code/main/.vs/CN Assignment 3/v17/ipch/AutoPCH/73cac205d0b03e0/ECHOCLIENT.ipch
