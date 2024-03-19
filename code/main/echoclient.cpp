@@ -77,12 +77,25 @@ int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-	std::cout << Utils::OpenFolder();
-	std::string host{}, portString{};
+	std::string host{}, TCPServer{}, UDPServer, UDPClient, downloadPath{};
 	std::cout << "Server IP Address: ";
 	std::cin >> host;
-	std::cout << "\nServer Port Number: ";
-	std::cin >> portString;
+	std::cout << std::endl;
+
+	std::cout << "Server TCP Port Number: ";
+	std::cin >> TCPServer;
+	std::cout << std::endl;
+
+	std::cout << "Server UDP Port Number: ";
+	std::cin >> UDPServer;
+	std::cout << std::endl;
+
+	std::cout << "Client UDP Port Number: ";
+	std::cin >> UDPClient;
+	std::cout << std::endl;
+
+	std::cout << "Path to store files: ";
+	std::cin >> downloadPath;
 	std::cout << std::endl;
 
 
@@ -123,7 +136,7 @@ int main(int argc, char** argv)
 
 
 	addrinfo* info = nullptr;
-	errorCode = getaddrinfo(host.c_str(), portString.c_str(), &hints, &info);
+	errorCode = getaddrinfo(host.c_str(), TCPServer.c_str(), &hints, &info);
 	if ((errorCode) || (info == nullptr))
 	{
 		std::cerr << "getaddrinfo() failed." << std::endl;
@@ -197,12 +210,15 @@ int main(int argc, char** argv)
 		{
 			output += REQ_LISTFILES;
 		}
-		else if (input.substr(0, 3) == "/e " && input.size() > 3)
+		else if (input.substr(0, 3) == "/d " && input.size() > 3)
 		{
-			output += REQ_DOWNLOAD;
+			// sample cmd: "/d 192.168.0.98:9010 filelist.cpp"
+			output += REQ_DOWNLOAD; // cmdid 1 byte
+
+			// Setting up of ipaddress and port number
 			input = input.substr(3); // get rid of command id and preceding space
 			std::istringstream iss{ input }; 
-			std::string IPPortPair{}, portNum{}, message{};
+			std::string IPPortPair{}, portNum{}, filePath{};
 			iss >> IPPortPair; //get IP and port number as a pair
 			std::string IP{ IPPortPair.substr(0, IPPortPair.find(':')) }; //parse them to ip and port number
 			input = input.substr(input.find(':') + 1); //get the message, getting rid of 1 space meant to distinguish the port number and message. All preceding spaces are included in the message
@@ -213,18 +229,19 @@ int main(int argc, char** argv)
 					portNum += input[i];
 				}
 			}
-			message = input.substr(input.find(' ') + 1); //get the message. weird edge case to match example....
-			uint32_t messageSz = static_cast<uint32_t>(htonl(static_cast<u_long>(message.size())));
-
+			filePath = input.substr(input.find(' ') + 1); //get the message. weird edge case to match example....
+			uint32_t messageSz = static_cast<uint32_t>(htonl(static_cast<u_long>(filePath.size())));
+			// ip address
 			sockaddr_in Ipbinary{};
 			inet_pton(AF_INET, IP.c_str(), &(Ipbinary.sin_addr));
 			output.append(reinterpret_cast<char*>(&Ipbinary.sin_addr.S_un.S_addr), sizeof(Ipbinary.sin_addr.S_un.S_addr));
-			uint16_t port = htons(std::stoi(portNum));
-
+			// port
+			uint16_t port = Utils::StringTo_ntohs(portNum);
 			output.append(reinterpret_cast<char*>(&port), sizeof(port));
+			// file name length
 			output.append(reinterpret_cast<char*>(&messageSz), sizeof(messageSz));
-
-			output += message;
+			// file name
+			output += filePath;
 		}
 		else 
 		{
@@ -279,62 +296,53 @@ void receive(SOCKET clientSocket) {
 			{
 				std::string IP = text.substr(1, 4);
 				std::string portNum = text.substr(5, 2);
-				u_long msgLength = Utils::StringTo_ntohl(text.substr(7, 4)); //message length start. No command ID so start from the beginning
-				std::string msg = text.substr(11); //message after the message length
+				u_long sessionID = Utils::StringTo_ntohl(text.substr(7, 4)); // session id
+				std::string msg = text.substr(11); // file length? brief never specify btyes
 
-				char str[INET_ADDRSTRLEN];
-				if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
-				{
-					message += std::string(str) + ':' + std::to_string(Utils::StringTo_ntohs(portNum)) + '\n';  //append the port number and ip to the final message
-				}
 
-				while (msg.length() < msgLength) //if the message is shorter than the indicated message length
-				{
-					//to receive the rest of the message
-					char buffer[BUFFER_SIZE];
-					int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
-					if (!bytesReceived) { // error checking or to break out of loop
-						break;
-					}
+				/// INSERT UDP HERE
+				//char str[INET_ADDRSTRLEN];
+				//if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
+				//{
+				//	message += std::string(str) + ':' + std::to_string(Utils::StringTo_ntohs(portNum)) + '\n';  //append the port number and ip to the final message
+				//}
+				//while (msg.length() < msgLength) //if the message is shorter than the indicated message length
+				//{
+				//	//to receive the rest of the message
+				//	char buffer[BUFFER_SIZE];
+				//	int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
+				//	if (!bytesReceived) { // error checking or to break out of loop
+				//		break;
+				//	}
 
-					buffer[bytesReceived] = '\0';
-					msg += std::string(buffer, bytesReceived); //append the message together
-				}
-				message += msg;
+				//	buffer[bytesReceived] = '\0';
+				//	msg += std::string(buffer, bytesReceived); //append the message together
+				//}
+				//message += msg;
 
-				if (text[0] == REQ_DOWNLOAD) 
-				{
-					text[0] = REQ_DOWNLOAD;
-					send(clientSocket, text.c_str(), static_cast<int>(text.length()), 0);
-				}
+				//if (text[0] == REQ_DOWNLOAD) 
+				//{
+				//	text[0] = REQ_DOWNLOAD;
+				//	send(clientSocket, text.c_str(), static_cast<int>(text.length()), 0);
+				//}
 			}
 			else if (text[0] == RSP_LISTFILES) 
 			{
-				std::string sz = text.substr(1, 2); //get the number of IP/port pairs
-				size_t numOfPairs = Utils::StringTo_ntohs(sz); //convert to size_t
-				text = text.substr(3); //get rid of command id and size
-				message += "Users:\n";
-				for (size_t i{}; i < numOfPairs; ++i)
-				{
-					std::string IP = text.substr(0, 4); //get the IP in binary
-					text = text.substr(4); //remove the IP that was just gotten
-					std::string portNum = text.substr(0, 2); //get the port number in binary
-					text = text.substr(2); //remove the port number that was just gotten
+				u_short fileCount = Utils::StringTo_ntohs(text.substr(1, 2)); // number of files
+				u_long listLength = Utils::StringTo_ntohl(text.substr(3, 4)); // total number of bytes for length+name
 
-					char str[INET_ADDRSTRLEN];
-					if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
-					{
-						message += std::string(str) + ':' + std::to_string(ntohs(Utils::StringTo_ntohs(portNum)));  //append the port number and ip to the final message
-					}
-					if (i + 1 != numOfPairs) //if its not the last IP/port number pair, add a new line
-					{
-						message += '\n';
-					}
+				message += "List of Files:\n";
+				for (size_t i{}, offset{}; i < fileCount; ++i)
+				{
+					u_long fileNameLength = Utils::StringTo_ntohl(text.substr(i + 7 + offset, 4)); // offset by first 7 bytes
+					std::string fileName = text.substr(i + 11 + offset, fileNameLength); // offset by first 7 bytes + 4 bytes (fileNameLength)
+					message += fileName + '\n';
+					offset = static_cast<size_t>(fileNameLength) + 4;
 				}
 			}
 			else if (text[0] == DOWNLOAD_ERROR)
 			{
-				message = "Echo error";
+				message = "Download error";
 			}
 
 			std::cout << "==========RECV START==========" << std::endl;
