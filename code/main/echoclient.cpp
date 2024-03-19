@@ -36,40 +36,7 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include <iomanip>
 #include <thread>
 
-/*!***********************************************************************
-\brief
-Changes the message length in network order to its string representation in hex form through binary manipulation.
-\param[in, out] long
-the long that is the message length to be converted to string
-\return
-The string representing the message length in network order
-*************************************************************************/
-std::string htonlToString(u_long input) {
-	std::string output(sizeof(unsigned long), '\0'); // Initialize string with the size of u_long, filled with '\0'
-	std::memcpy(&output[0], &input, sizeof(unsigned long)); // Copy the binary data of val into the string
-	return output;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a unsigned long
-for ntohl to process.
-\param[in, out] string
-the input string representing the length of the message in network order
-\return
-the long representing the system order
-*************************************************************************/
-u_long StringTontohl(std::string const& input) {
-	u_long ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
-	return ret;
-}
-
-uint16_t StringTontohs(std::string const& input) {
-	uint16_t ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(uint16_t)); // copy binary data into the string
-	return ret;
-}
+#include "Utils.h"			// helper file
 
 
 /*!***********************************************************************
@@ -225,11 +192,11 @@ int main(int argc, char** argv)
  		}
 		else if(input == "/l")
 		{
-			output += REQ_LISTUSERS;
+			output += REQ_LISTFILES;
 		}
 		else if (input.substr(0, 3) == "/e " && input.size() > 3)
 		{
-			output += REQ_ECHO;
+			output += REQ_DOWNLOAD;
 			input = input.substr(3); // get rid of command id and preceding space
 			std::istringstream iss{ input }; 
 			std::string IPPortPair{}, portNum{}, message{};
@@ -256,52 +223,6 @@ int main(int argc, char** argv)
 
 			output += message;
 		}
- 		else if (input.substr(0, 3) == "/t " && input.size() > 3) //if user indicate to message is in raw hexidecimal form, convert to human readable message
- 		{
- 			input = input.substr(3); //get rid of leading /t and space
-			uint8_t commandID = static_cast<uint8_t>(std::stoul(input.substr(0,2), nullptr, 16)); //get the command id
- 			if (commandID == REQ_ECHO) //check if command id is not quit as raw data may just tell us to quit
- 			{
-				output += REQ_ECHO;
-				input = input.substr(4); // get rid of command id and preceding space
-				std::istringstream iss{ input };
-				std::string IPPortPair{}, portNum{}, message{};
-				iss >> IPPortPair; //get IP and port number as a pair
-				std::string IP{ IPPortPair.substr(0, IPPortPair.find(':')) }; //parse them to ip and port number
-				input = input.substr(input.find(':') + 1); //get the message, getting rid of 1 space meant to distinguish the port number and message. All preceding spaces are included in the message
-				for (size_t i{}; i < input.size(); ++i) //get the port number. Some weird edge case to do it like this
-				{
-					if (isdigit(input[i]))
-					{
-						portNum += input[i];
-					}
-				}
-				message = input.substr(input.find(' ') + 1); //get the message. weird edge case to match example....
-				uint32_t messageSz = htonl(static_cast<u_long>(message.size()));
-
-				sockaddr_in Ipbinary{};
-				inet_pton(AF_INET, IP.c_str(), &(Ipbinary.sin_addr));
-				output.append(reinterpret_cast<char*>(&Ipbinary.sin_addr.S_un.S_addr), sizeof(Ipbinary.sin_addr.S_un.S_addr));
-				uint16_t port = htons(std::stoi(portNum));
-
-				output.append(reinterpret_cast<char*>(&port), sizeof(port));
-				output.append(reinterpret_cast<char*>(&messageSz), sizeof(messageSz));
-
-				output += message;
- 			}
-			else if (commandID == REQ_LISTUSERS) //if the hex code is telling us to quit
-			{
-				output += REQ_LISTUSERS;
-			}
-			else if (commandID == REQ_QUIT)
-			{
-				output += REQ_QUIT;
-			}
-			else
-			{
-				output += UNKNOWN; //invalid code that isnt quit or echo. Put it as the echoid + 1 which would be invalid
-			}
- 		}
 		else 
 		{
 			output += UNKNOWN;
@@ -351,17 +272,17 @@ void receive(SOCKET clientSocket) {
 			buffer[bytesReceived] = '\0';
 			std::string text(buffer, bytesReceived);
 
-			if (text[0] == REQ_ECHO || text[0] == RSP_ECHO) // request echo from server, to send back message with response echo code
+			if (text[0] == RSP_DOWNLOAD) // request echo from server, to send back message with response echo code
 			{
 				std::string IP = text.substr(1, 4);
 				std::string portNum = text.substr(5, 2);
-				u_long msgLength = ntohl(StringTontohl(text.substr(7, 4))); //message length start. No command ID so start from the beginning
+				u_long msgLength = Utils::StringTo_ntohl(text.substr(7, 4)); //message length start. No command ID so start from the beginning
 				std::string msg = text.substr(11); //message after the message length
 
 				char str[INET_ADDRSTRLEN];
 				if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
 				{
-					message += std::string(str) + ':' + std::to_string(ntohs(StringTontohs(portNum))) + '\n';  //append the port number and ip to the final message
+					message += std::string(str) + ':' + std::to_string(Utils::StringTo_ntohs(portNum)) + '\n';  //append the port number and ip to the final message
 				}
 
 				while (msg.length() < msgLength) //if the message is shorter than the indicated message length
@@ -378,16 +299,16 @@ void receive(SOCKET clientSocket) {
 				}
 				message += msg;
 
-				if (text[0] == REQ_ECHO) 
+				if (text[0] == REQ_DOWNLOAD) 
 				{
-					text[0] = RSP_ECHO;
+					text[0] = REQ_DOWNLOAD;
 					send(clientSocket, text.c_str(), static_cast<int>(text.length()), 0);
 				}
 			}
-			else if (text[0] == RSP_LISTUSERS) 
+			else if (text[0] == RSP_LISTFILES) 
 			{
 				std::string sz = text.substr(1, 2); //get the number of IP/port pairs
-				size_t numOfPairs = ntohs(StringTontohs(sz)); //convert to size_t
+				size_t numOfPairs = Utils::StringTo_ntohs(sz); //convert to size_t
 				text = text.substr(3); //get rid of command id and size
 				message += "Users:\n";
 				for (size_t i{}; i < numOfPairs; ++i)
@@ -400,7 +321,7 @@ void receive(SOCKET clientSocket) {
 					char str[INET_ADDRSTRLEN];
 					if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
 					{
-						message += std::string(str) + ':' + std::to_string(ntohs(StringTontohs(portNum)));  //append the port number and ip to the final message
+						message += std::string(str) + ':' + std::to_string(ntohs(Utils::StringTo_ntohs(portNum)));  //append the port number and ip to the final message
 					}
 					if (i + 1 != numOfPairs) //if its not the last IP/port number pair, add a new line
 					{
@@ -408,7 +329,7 @@ void receive(SOCKET clientSocket) {
 					}
 				}
 			}
-			else if (text[0] == ECHO_ERROR)
+			else if (text[0] == DOWNLOAD_ERROR)
 			{
 				message = "Echo error";
 			}

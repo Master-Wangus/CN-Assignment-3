@@ -18,7 +18,7 @@
     <ClCompile Include="echoclient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="echoserver.cpp">
+    <ClCompile Include="Utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
