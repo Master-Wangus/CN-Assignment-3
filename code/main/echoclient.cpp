@@ -75,6 +75,9 @@ enum CMDID {
 // This program requires one extra command-line parameter: a server hostname.
 int main(int argc, char** argv)
 {
+	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+	std::cout << Utils::OpenFolder();
 	std::string host{}, portString{};
 	std::cout << "Server IP Address: ";
 	std::cin >> host;
@@ -246,7 +249,7 @@ int main(int argc, char** argv)
 		 std::cerr << "shutdown() failed." << std::endl;
 	 }
 	 closesocket(clientSocket); //close socket fr
-
+	 CoUninitialize();
 	WSACleanup(); //goodnight 
 }
 

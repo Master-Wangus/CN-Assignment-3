@@ -1,6 +1,8 @@
 #include "Utils.h"
 
 #include <Windows.h>		// windows API
+#include <shlobj.h>			// folder dialog
+#include <iostream>
 
 namespace Utils
 {
@@ -32,12 +34,38 @@ namespace Utils
 	}
 	std::filesystem::path OpenFolder()
 	{
-		OPENFILENAMEA folderDialog;
-		CHAR szfile[260] = { 0 };
-		ZeroMemory(&folderDialog, sizeof(OPENFILENAME));
-		folderDialog.lStructSize = sizeof(OPENFILENAME);
+		std::filesystem::path value;
+		IFileDialog *dialog = NULL;
+		SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+		if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+		{
+			DWORD dwOptions;
+			if (SUCCEEDED(dialog->GetOptions(&dwOptions)))
+			{
+				dialog->SetOptions(dwOptions | FOS_PICKFOLDERS);
+			}
+			if (SUCCEEDED(dialog->Show(NULL)))
+			{
+				IShellItem* psi = NULL;
+				LPWSTR g_path;
+				if (SUCCEEDED(dialog->GetResult(&psi)))
+				{
+					if (SUCCEEDED(psi->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &g_path)))
+					{
+						
+						int length = WideCharToMultiByte(CP_UTF8, 0, g_path, -1, nullptr, 0, nullptr, nullptr);
+						std::string temp(length, 0);
+						WideCharToMultiByte(CP_UTF8, 0, g_path, -1, &temp[0], length, nullptr, nullptr);
+						value = std::filesystem::path(temp);
 
-		return std::filesystem::path();
+						CoTaskMemFree(g_path);
+					}
+				}
+				psi->Release();
+			}
+		}
+		dialog->Release();
+		return value;
 	}
 }
 
