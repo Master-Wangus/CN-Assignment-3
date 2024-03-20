@@ -58,17 +58,21 @@ int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-	std::string host{}, TCPServer{}, UDPServer, UDPClient, downloadPath{};
+	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, downloadPath{};
 	std::cout << "Server IP Address: ";
-	std::cin >> host;
+	std::cin >> ServerIP;
 	std::cin.clear();
 
 	std::cout << "Server TCP Port Number: ";
-	std::cin >> TCPServer;
+	std::cin >> TCPServerPort;
 	std::cin.clear();
 
 	std::cout << "Server UDP Port Number: ";
-	std::cin >> UDPServer;
+	std::cin >> UDPServerPort;
+	std::cin.clear();
+
+	std::cout << "Client UDP Port Number: ";
+	std::cin >> UDPClientPort;
 	std::cin.clear();
 
 	std::cout << "Path to store files: ";
@@ -120,8 +124,18 @@ int main(int argc, char** argv)
 
 
 	addrinfo* TCPinfo = nullptr;
-	errorCode = getaddrinfo(host.c_str(), TCPServer.c_str(), &TCPhints, &TCPinfo);
+	errorCode = getaddrinfo(ServerIP.c_str(), TCPServerPort.c_str(), &TCPhints, &TCPinfo);
 	if ((errorCode) || (TCPinfo == nullptr))
+	{
+		std::cerr << "getaddrinfo() failed." << std::endl;
+		WSACleanup();
+		return errorCode;
+	}
+
+	// Resolve the local address and port to be used by the server
+	addrinfo* UDPinfo = nullptr;
+	errorCode = getaddrinfo(nullptr, UDPClientPort.c_str(), &UDPhints, &UDPinfo);
+	if ((errorCode) || (UDPinfo == nullptr))
 	{
 		std::cerr << "getaddrinfo() failed." << std::endl;
 		WSACleanup();
@@ -160,22 +174,7 @@ int main(int argc, char** argv)
 		return 3;
 	}
 
-
-	// -------------------------------------------------------------------------
-	// Get clients UDP socket
-	//
-	// getaddrinfo()
-	// -------------------------------------------------------------------------
-
-	addrinfo* UDPinfo = nullptr;
-	errorCode = getaddrinfo(host.c_str(), UDPServer.c_str(), &UDPhints, &UDPinfo);
-	if ((errorCode) || (UDPinfo == nullptr))
-	{
-		std::cerr << "getaddrinfo() failed." << std::endl;
-		WSACleanup();
-		return errorCode;
-	}
-
+	// Creation of UDP socket
 	SOCKET UDPsocket = socket(
 		UDPinfo->ai_family,
 		UDPinfo->ai_socktype,
@@ -199,13 +198,6 @@ int main(int argc, char** argv)
 		closesocket(UDPsocket);
 		UDPsocket = INVALID_SOCKET;
 	}
-
-	
-	// printing of udp port number (need testing)
-	sockaddr_in* clientIPv4 = (sockaddr_in*)&UDPinfo;
-	std::cout << "Client UDP Port Number: ";
-	std::cout << clientIPv4->sin_port;
-	std::cout << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Send some text.
