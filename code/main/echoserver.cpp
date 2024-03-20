@@ -27,8 +27,11 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include "ws2tcpip.h"		// getaddrinfo()
 #include <thread>
 #include "taskqueue.h"
+#include <filesystem>
+#include <iostream>
+#include <fstream>
  
- bool execute(SOCKET clientSocket);
+bool execute(SOCKET clientSocket);
 void disconnect(SOCKET& listenerSocket);
 
 // Tell the Visual Studio linker to include the following library in linking.
@@ -112,7 +115,6 @@ SOCKET SearchConnectedSockets(std::vector<std::pair<sockaddr_in, SOCKET>>const& 
 	return -1;
 }
 
-
 /*!***********************************************************************
 \brief
 Converts a hex string into human readable string
@@ -132,6 +134,7 @@ std::string HexToString(const std::string& inputstring) {
 	return output;
 }
 
+
 enum CMDID {
 	UNKNOWN = (unsigned char)0x0,//not used
 	REQ_QUIT = (unsigned char)0x1,
@@ -143,8 +146,8 @@ enum CMDID {
 	DOWNLOAD_ERROR = (unsigned char)0x30
 };
 
-
 std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
+uint16_t UDPPortNumber{};
 
 int main()
 {
@@ -169,14 +172,23 @@ int main()
 	}
 
 	// to ask user for port number and convert it to string
-	uint16_t portNumber{};
+	uint16_t TCPPortNumber{};
 	std::cout << "Server Port Number: ";
-	if (!(std::cin >> portNumber))
+	if (!(std::cin >> TCPPortNumber))
 	{
 		WSACleanup();
 		return 0;
 	}
-	std::string portString{ std::to_string(portNumber) };
+	std::string TCPportString{ std::to_string(TCPPortNumber) };
+
+	//uint16_t UDPPortNumber{};
+	std::cout << "Server Port Number: ";
+	if (!(std::cin >> UDPPortNumber))
+	{
+		WSACleanup();
+		return 0;
+	}
+	std::string UDPportString{ std::to_string(UDPPortNumber) };
 
 	
 
@@ -201,7 +213,7 @@ int main()
 	char ip[INET_ADDRSTRLEN]{};
 	gethostname(ip, INET_ADDRSTRLEN);
 	addrinfo* info = nullptr;
-	errorCode = getaddrinfo(ip, portString.c_str(), &hints, &info);
+	errorCode = getaddrinfo(ip, TCPportString.c_str(), &hints, &info);
 	if ((errorCode) || (info == nullptr))
 	{
 		std::cerr << "getaddrinfo() failed." << std::endl;
@@ -251,7 +263,8 @@ int main()
 	}
 
 	std::cout << "\nServer IP Address: " << ip << std::endl;
-	std::cout << "Server Port Number: " << portString << std::endl;
+	std::cout << "Server TCP Port Number: " << TCPportString << std::endl;
+	std::cout << "Server UDP Port Number: " << UDPportString << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Set a socket in a listening mode and accept 1 incoming client.
@@ -327,6 +340,22 @@ int main()
 bool execute(SOCKET clientSocket)
 {
 	bool stay = true;
+	std::string downLoadRepo{};
+	std::ifstream fs("Config.txt", std::ios::binary); // open the config file
+
+
+	std::string parse{};
+	std::getline(fs, parse);
+	//downLoadRepo = parse.substr(parse.find_first_of(" ") + 1);
+	downLoadRepo = parse;
+
+	while (downLoadRepo.empty() || !std::filesystem::exists(downLoadRepo))
+	{
+		std::cout << "Enter a valid download repository: ";
+		std::getline(std::cin, downLoadRepo);
+	}
+	
+	
 
 	// Enable non-blocking I/O on a socket.
 	u_long enable = 1;
@@ -362,16 +391,16 @@ bool execute(SOCKET clientSocket)
 		{
 			break;
 		}
-		else if (text[0] == REQ_ECHO || text[0] == RSP_ECHO) //check 1st byte  == echo
+		else if (text[0] == REQ_DOWNLOAD) //check 1st byte  == echo
 		{
-			std::string destinationIP{ text.substr(1, 4) }; //get the ip
-			uint16_t portNum{ ntohs(StringTontohs(text.substr(5, 2))) }; //get the port numba in host order bytes
-			u_long messageLength{ ntohl(StringTontohl(text.substr(7, 4))) }; //get the message length in host order bytes
-			std::string message{ text.substr(11) }; //get the message
+			std::string clientIP{ text.substr(1, 4) }; //get the ip
+			uint16_t ClientUDPportNum{ ntohs(StringTontohs(text.substr(5, 2))) }; //get the port numba in host order bytes
+			u_long fileNameLength{ ntohl(StringTontohl(text.substr(7, 4))) }; //get the message length in host order bytes
+			std::string filename{ text.substr(11) }; //get the message
 
 			std::string output{};
 
-			std::pair<long, uint16_t> addr = std::make_pair(*reinterpret_cast<ULONG*>(destinationIP.data()), (portNum));
+			std::pair<long, uint16_t> addr = std::make_pair(*reinterpret_cast<ULONG*>(clientIP.data()), (ClientUDPportNum));
 			SOCKET destinationSocket{};
 
 			if ((destinationSocket = SearchConnectedSockets(connectedSockets, addr)) == -1) {
@@ -380,75 +409,27 @@ bool execute(SOCKET clientSocket)
 				continue;
 			}
 
-			fd_set readSet; //to check for activity reference here /https://inst.eecs.berkeley.edu/~ee122/sp05/sockets-select_function.pdf
-			FD_ZERO(&readSet);
-			FD_SET(clientSocket, &readSet);
-
-			// timeout to check if anymore activity at client socket. If not, terminate
-			timeval timeout;
-			timeout.tv_sec = 2;  // 2 sec delay. Give the client some time to send in case of lag
-			timeout.tv_usec = 0;
-
-			// Loop to receive the rest of the message
-			while (message.length() < messageLength){
-				int activity = select(static_cast<int>(clientSocket/* + 1 */), &readSet, nullptr, nullptr, &timeout); //checking for activity by selecting client socket
-				if (activity < 0 || !activity){ //error or no activity detected
-					break;
-				}
-
-				//to receive the rest of the message
-				char buffer[BUFFER_SIZE];
-				int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
-				if (!bytesReceived){ // error checking or to break out of loop
-					break;
-				}
-
-				buffer[bytesReceived] = '\0';
-				message += std::string(buffer, bytesReceived); //append the message together
-			}
-
-			if (messageLength != message.length()){ //message length and actual message length don't match
-				std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
-				std::cout << "Error invalid message length" << std::endl;
-				break;
-			}
-
-			sockaddr_in clientAddr{};
-			socklen_t clientAddrLen = sizeof(clientAddr);
-			getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
-			memcpy(text.data() + 1, &clientAddr.sin_addr.S_un.S_addr, sizeof(clientAddr.sin_addr.S_un.S_addr));
-			short nStr = clientAddr.sin_port;
-			memcpy(text.data() + 5, &nStr, 2);
-
-			if (text[0] == REQ_ECHO) {
-				std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
-				std::cout << "==========RECV START==========" << std::endl;
-				char ipStr[INET_ADDRSTRLEN];
-				inet_ntop(AF_INET, destinationIP.c_str(), ipStr, INET_ADDRSTRLEN);
-				std::cout << ipStr << ':' << portNum << std::endl;
-				std::cout << message << std::endl;
-				std::cout << "==========RECV END==========" << std::endl;
-			}
-
-			const int bytesSent = send(destinationSocket, text.c_str(), static_cast<int>(text.length()), 0); //send the message back to client
-
-			if (bytesSent == SOCKET_ERROR){
-				std::cerr << "send() failed." << std::endl;
-				break;
-			}
+			
 		}
-		else if(text[0] == REQ_LISTUSERS)
+		else if(text[0] == REQ_LISTFILES)
 		{
-			std::string listOfUsers{};
-			listOfUsers = RSP_LISTUSERS;
-			listOfUsers += htonsToString(htons(static_cast<uint16_t>(connectedSockets.size())));
-			for (auto const& pair : connectedSockets) 
-			{	
-				sockaddr_in addr = pair.first;
-				listOfUsers.append(reinterpret_cast<char*>(&addr.sin_addr.S_un.S_addr), sizeof(addr.sin_addr.S_un.S_addr));
-				listOfUsers.append(reinterpret_cast<char*>(&addr.sin_port), sizeof(addr.sin_port));
+			std::string listOfFiles{};
+			listOfFiles = RSP_LISTFILES;
+
+			size_t NumOfFiles{};
+			std::vector<std::string>FileNames{};
+			for (auto const& file : std::filesystem::directory_iterator{ downLoadRepo })
+			{
+				++NumOfFiles;
+				FileNames.emplace_back(std::filesystem::_Parse_filename(file.path().c_str()));
 			}
-			send(clientSocket, listOfUsers.c_str(), static_cast<int>(listOfUsers.size()), 0);
+
+
+
+			listOfFiles += htonsToString(htons(static_cast<uint16_t>(NumOfFiles)));
+
+			
+			send(clientSocket, listOfFiles.c_str(), static_cast<int>(listOfFiles.size()), 0);
 		}
 		else
 		{
