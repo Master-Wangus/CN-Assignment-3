@@ -147,7 +147,8 @@ enum CMDID {
 };
 
 std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
-uint16_t UDPPortNumber{};
+uint16_t UDPPortNumber{}, TCPPortNumber{};
+SOCKET listenerSocket{};
 
 int main()
 {
@@ -172,8 +173,8 @@ int main()
 	}
 
 	// to ask user for port number and convert it to string
-	uint16_t TCPPortNumber{};
-	std::cout << "Server Port Number: ";
+	//uint16_t TCPPortNumber{};
+	std::cout << "Server TCP Port Number: ";
 	if (!(std::cin >> TCPPortNumber))
 	{
 		WSACleanup();
@@ -182,7 +183,7 @@ int main()
 	std::string TCPportString{ std::to_string(TCPPortNumber) };
 
 	//uint16_t UDPPortNumber{};
-	std::cout << "Server Port Number: ";
+	std::cout << "Server UDP Port Number: ";
 	if (!(std::cin >> UDPPortNumber))
 	{
 		WSACleanup();
@@ -220,7 +221,7 @@ int main()
 		WSACleanup();
 		return errorCode;
 	}
-	
+
 	inet_ntop(AF_INET, &(reinterpret_cast<sockaddr_in *>(info->ai_addr))->sin_addr, ip, INET_ADDRSTRLEN);
 
 	// -------------------------------------------------------------------------
@@ -230,7 +231,7 @@ int main()
 	// bind()
 	// -------------------------------------------------------------------------
 
-	SOCKET listenerSocket = socket(
+	listenerSocket = socket(
 		hints.ai_family,
 		hints.ai_socktype,
 		hints.ai_protocol);
@@ -343,6 +344,10 @@ bool execute(SOCKET clientSocket)
 	std::string downLoadRepo{};
 	std::ifstream fs("Config.txt", std::ios::binary); // open the config file
 
+	if (fs.is_open())
+	{
+		std::cout << "Loading Server paramters from config file" << std::endl;
+	}
 
 	std::string parse{};
 	std::getline(fs, parse);
@@ -393,42 +398,59 @@ bool execute(SOCKET clientSocket)
 		}
 		else if (text[0] == REQ_DOWNLOAD) //check 1st byte  == echo
 		{
-			std::string clientIP{ text.substr(1, 4) }; //get the ip
-			uint16_t ClientUDPportNum{ ntohs(StringTontohs(text.substr(5, 2))) }; //get the port numba in host order bytes
+			std::string clientIP{ text.substr(1, 4) }; //get the ip of the client requesting UDP file download
+			uint16_t ClientUDPportNum{ ntohs(StringTontohs(text.substr(5, 2))) }; //get the client UDP port numba in host order bytes
 			u_long fileNameLength{ ntohl(StringTontohl(text.substr(7, 4))) }; //get the message length in host order bytes
 			std::string filename{ text.substr(11) }; //get the message
 
 			std::string output{};
+			std::filesystem::path filePath = std::filesystem::path(downLoadRepo) / filename;
+			if (std::filesystem::exists(filePath)) //file exist, sending client UDP details
+			{
+				output += RSP_DOWNLOAD;
+				sockaddr_in serverAddr{};
+				int addrSize = sizeof(serverAddr);
+				getsockname(listenerSocket, (struct sockaddr*)&serverAddr, &addrSize);
+				
+				output.append(reinterpret_cast<char*>(&serverAddr.sin_addr.S_un.S_addr), sizeof(serverAddr.sin_addr.S_un.S_addr));
+				output += htons(UDPPortNumber);
+				ULONG sessionID{}; // WESLEY TO INCORPORATE SESSION ID
 
-			std::pair<long, uint16_t> addr = std::make_pair(*reinterpret_cast<ULONG*>(clientIP.data()), (ClientUDPportNum));
-			SOCKET destinationSocket{};
+				output += htonl(sessionID);
 
-			if ((destinationSocket = SearchConnectedSockets(connectedSockets, addr)) == -1) {
-				output += ECHO_ERROR;
-				send(clientSocket, output.c_str(), static_cast<int>(output.size()), 0);
-				continue;
+				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
+				output += fileLength;
+			}
+			else // file does not exist
+			{
+				output += DOWNLOAD_ERROR; 
 			}
 
-			
+			send(clientSocket, output.c_str(), static_cast<int>(output.size()), 0);
 		}
 		else if(text[0] == REQ_LISTFILES)
 		{
-			std::string listOfFiles{};
-			listOfFiles = RSP_LISTFILES;
+			std::string listOfFiles{ RSP_LISTFILES };
 
-			size_t NumOfFiles{};
+			size_t NumOfFiles{}, lengthOFFileList{};
 			std::vector<std::string>FileNames{};
 			for (auto const& file : std::filesystem::directory_iterator{ downLoadRepo })
 			{
 				++NumOfFiles;
-				FileNames.emplace_back(std::filesystem::_Parse_filename(file.path().c_str()));
+				std::string fileName = file.path().filename().string();
+				FileNames.emplace_back(fileName);
+				lengthOFFileList += fileName.size() + 4; // calculate the length of file list
 			}
 
-
-
 			listOfFiles += htonsToString(htons(static_cast<uint16_t>(NumOfFiles)));
+			listOfFiles += htonlToString(htonl(static_cast<uint16_t>(lengthOFFileList)));
 
-			
+			for (std::string const& i : FileNames)
+			{
+				listOfFiles += htonl(static_cast<ULONG>(i.size()));
+				listOfFiles += i;
+			}
+
 			send(clientSocket, listOfFiles.c_str(), static_cast<int>(listOfFiles.size()), 0);
 		}
 		else
