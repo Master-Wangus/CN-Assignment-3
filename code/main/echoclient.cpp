@@ -58,25 +58,35 @@ int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, downloadPath{};
+	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, 
+				downloadPath{}, slidingWindowSz{}, packetLossRate{};
+
 	std::cout << "Server IP Address: ";
 	std::cin >> ServerIP;
-	std::cin.clear();
+	std::cout << std::endl;
 
 	std::cout << "Server TCP Port Number: ";
 	std::cin >> TCPServerPort;
-	std::cin.clear();
+	std::cout << std::endl;
 
 	std::cout << "Server UDP Port Number: ";
 	std::cin >> UDPServerPort;
-	std::cin.clear();
+	std::cout << std::endl;
 
 	std::cout << "Client UDP Port Number: ";
 	std::cin >> UDPClientPort;
-	std::cin.clear();
+	std::cout << std::endl;
 
 	std::cout << "Path to store files: ";
 	std::cin >> downloadPath;
+	std::cout << std::endl;
+
+	std::cout << "Sliding window size: ";
+	std::cin >> slidingWindowSz;
+	std::cout << std::endl;
+
+	std::cout << "Packet loss rate:";
+	std::cin >> packetLossRate;
 	std::cout << std::endl;
 
 
@@ -374,13 +384,13 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				u_short fileCount = Utils::StringTo_ntohs(text.substr(1, 2)); // number of files
 				u_long listLength = Utils::StringTo_ntohl(text.substr(3, 4)); // total number of bytes for length+name
 
-				message += "List of Files:\n";
+				message += "\n# of Files: " + std::to_string(fileCount) + '\n';
 				for (size_t i{}, offset{}; i < fileCount; ++i)
 				{
-					u_long fileNameLength = Utils::StringTo_ntohl(text.substr(i + 7 + offset, 4)); // offset by first 7 bytes
-					std::string fileName = text.substr(i + 11 + offset, fileNameLength); // offset by first 7 bytes + 4 bytes (fileNameLength)
-					message += fileName + '\n';
-					offset = static_cast<size_t>(fileNameLength) + 4;
+					u_long fileNameLength = Utils::StringTo_ntohl(text.substr(7 + offset, 4)); // offset by first 7 bytes
+					std::string fileName = text.substr(11 + offset, fileNameLength); // offset by first 7 bytes + 4 bytes (fileNameLength)
+					message += std::to_string(i + 1) + "-th file: " + fileName + '\n';
+					offset += static_cast<size_t>(fileNameLength) + 4;
 				}
 			}
 			else if (text[0] == DOWNLOAD_ERROR)
@@ -389,7 +399,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 			}
 
 			std::cout << "==========RECV START==========" << std::endl;
-			std::cout << message << std::endl;
+			std::cout << message;
 			std::cout << "==========RECV END==========" << std::endl;
 		}
 	}
