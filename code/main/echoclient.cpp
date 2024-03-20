@@ -58,21 +58,35 @@ int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-	std::string host{}, TCPServer{}, UDPServer, UDPClient, downloadPath{};
+	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, 
+				downloadPath{}, slidingWindowSz{}, packetLossRate{};
+
 	std::cout << "Server IP Address: ";
-	std::cin >> host;
-	std::cin.clear();
+	std::cin >> ServerIP;
+	std::cout << std::endl;
 
 	std::cout << "Server TCP Port Number: ";
-	std::cin >> TCPServer;
-	std::cin.clear();
+	std::cin >> TCPServerPort;
+	std::cout << std::endl;
 
 	std::cout << "Server UDP Port Number: ";
-	std::cin >> UDPServer;
-	std::cin.clear();
+	std::cin >> UDPServerPort;
+	std::cout << std::endl;
+
+	std::cout << "Client UDP Port Number: ";
+	std::cin >> UDPClientPort;
+	std::cout << std::endl;
 
 	std::cout << "Path to store files: ";
 	std::cin >> downloadPath;
+	std::cout << std::endl;
+
+	std::cout << "Sliding window size: ";
+	std::cin >> slidingWindowSz;
+	std::cout << std::endl;
+
+	std::cout << "Packet loss rate:";
+	std::cin >> packetLossRate;
 	std::cout << std::endl;
 
 
@@ -120,8 +134,18 @@ int main(int argc, char** argv)
 
 
 	addrinfo* TCPinfo = nullptr;
-	errorCode = getaddrinfo(host.c_str(), TCPServer.c_str(), &TCPhints, &TCPinfo);
+	errorCode = getaddrinfo(ServerIP.c_str(), TCPServerPort.c_str(), &TCPhints, &TCPinfo);
 	if ((errorCode) || (TCPinfo == nullptr))
+	{
+		std::cerr << "getaddrinfo() failed." << std::endl;
+		WSACleanup();
+		return errorCode;
+	}
+
+	// Resolve the local address and port to be used by the server
+	addrinfo* UDPinfo = nullptr;
+	errorCode = getaddrinfo(nullptr, UDPClientPort.c_str(), &UDPhints, &UDPinfo);
+	if ((errorCode) || (UDPinfo == nullptr))
 	{
 		std::cerr << "getaddrinfo() failed." << std::endl;
 		WSACleanup();
@@ -160,22 +184,7 @@ int main(int argc, char** argv)
 		return 3;
 	}
 
-
-	// -------------------------------------------------------------------------
-	// Get clients UDP socket
-	//
-	// getaddrinfo()
-	// -------------------------------------------------------------------------
-
-	addrinfo* UDPinfo = nullptr;
-	errorCode = getaddrinfo(host.c_str(), UDPServer.c_str(), &UDPhints, &UDPinfo);
-	if ((errorCode) || (UDPinfo == nullptr))
-	{
-		std::cerr << "getaddrinfo() failed." << std::endl;
-		WSACleanup();
-		return errorCode;
-	}
-
+	// Creation of UDP socket
 	SOCKET UDPsocket = socket(
 		UDPinfo->ai_family,
 		UDPinfo->ai_socktype,
@@ -199,13 +208,6 @@ int main(int argc, char** argv)
 		closesocket(UDPsocket);
 		UDPsocket = INVALID_SOCKET;
 	}
-
-	
-	// printing of udp port number (need testing)
-	sockaddr_in* clientIPv4 = (sockaddr_in*)&UDPinfo;
-	std::cout << "Client UDP Port Number: ";
-	std::cout << clientIPv4->sin_port;
-	std::cout << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Send some text.
@@ -382,13 +384,13 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				u_short fileCount = Utils::StringTo_ntohs(text.substr(1, 2)); // number of files
 				u_long listLength = Utils::StringTo_ntohl(text.substr(3, 4)); // total number of bytes for length+name
 
-				message += "List of Files:\n";
+				message += "\n# of Files: " + std::to_string(fileCount) + '\n';
 				for (size_t i{}, offset{}; i < fileCount; ++i)
 				{
-					u_long fileNameLength = Utils::StringTo_ntohl(text.substr(i + 7 + offset, 4)); // offset by first 7 bytes
-					std::string fileName = text.substr(i + 11 + offset, fileNameLength); // offset by first 7 bytes + 4 bytes (fileNameLength)
-					message += fileName + '\n';
-					offset = static_cast<size_t>(fileNameLength) + 4;
+					u_long fileNameLength = Utils::StringTo_ntohl(text.substr(7 + offset, 4)); // offset by first 7 bytes
+					std::string fileName = text.substr(11 + offset, fileNameLength); // offset by first 7 bytes + 4 bytes (fileNameLength)
+					message += std::to_string(i + 1) + "-th file: " + fileName + '\n';
+					offset += static_cast<size_t>(fileNameLength) + 4;
 				}
 			}
 			else if (text[0] == DOWNLOAD_ERROR)
@@ -397,7 +399,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 			}
 
 			std::cout << "==========RECV START==========" << std::endl;
-			std::cout << message << std::endl;
+			std::cout << message;
 			std::cout << "==========RECV END==========" << std::endl;
 		}
 	}
