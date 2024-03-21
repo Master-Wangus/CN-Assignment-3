@@ -19,6 +19,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\packet.cpp">
+    <ClCompile Include="..\Utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -31,6 +32,8 @@
     </ClInclude>
     <ClInclude Include="..\packet.h">
       <Filter>Header Files</Filter>
+    <ClInclude Include="..\Utils.h">
+      <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -51,7 +51,7 @@ namespace Utils
 
 	u_short StringTo_htons(std::string const& input)
 	{
-		uint16_t ret = 0;
+		u_short ret = 0;
 		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
 		return htons(ret);
 	}
@@ -97,7 +97,7 @@ namespace Utils
 			checksum[i] = checksum[i] ^ 1;
 		}
 
-		return checksum.to_ullong();
+		return static_cast<USHORT>(checksum.to_ulong());
 	}
 
 	std::filesystem::path OpenFolder()

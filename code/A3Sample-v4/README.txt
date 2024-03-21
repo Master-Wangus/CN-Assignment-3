@@ -81,3 +81,10 @@ If you want to test your Server and Client against the sample given here,
 please take note that ACK Timer is set as 10ms 
 (I have not implemented adaptive timer like TCP).
 
+You may test more complicate scenarios, where you need to prepare two files: WinSCP_Setup.exe and opengl-tutorials-main.zip.
+Please download from MS Teams and add to C:\Test (if you use this as server directory for downloading).
+client-in-a3-4.txt and client-in-a3-5.txt are similar to client-in-a3-1.txt. 
+You can open two more command prompts to run client.exe for the above concurrently.
+This tests whether your client and server is able to support multiple file downloading (each time only one file is downloaded) 
+without client quitting.
+
