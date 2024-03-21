@@ -44,6 +44,8 @@ void disconnect(SOCKET& listenerSocket);
 #include <vector>
 
 
+//  <======================================================================= TO DELETE - START
+
 /*!***********************************************************************
 \brief
 Changes the message length in network order to its string representation in hex form through binary manipulation.
@@ -95,25 +97,6 @@ uint16_t StringTontohs(std::string const& input) {
 	return ret;
 }
 
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a unsigned long
-for ntohl to process.
-\param[in] std::vector<std::pair<sockaddr_in, SOCKET>>const& vec
-Vector of sockets
-\param[in] std::pair<long, uint16_t> addr
-IP and port to search for
-\return
-The socket found else -1
-*************************************************************************/
-SOCKET SearchConnectedSockets(std::vector<std::pair<sockaddr_in, SOCKET>>const& vec, std::pair<long, uint16_t> addr) {
-	for (std::pair<sockaddr_in, SOCKET> const& i : vec) {
-		if (i.first.sin_addr.S_un.S_addr == addr.first && ntohs(i.first.sin_port) == addr.second) {
-			return i.second;
-		}
-	}
-	return -1;
-}
 
 /*!***********************************************************************
 \brief
@@ -134,6 +117,28 @@ std::string HexToString(const std::string& inputstring) {
 	return output;
 }
 
+//  =======================================================================> TO DELETE - END
+
+
+/*!***********************************************************************
+\brief
+To convert the string taken as input which maybe network order and convert it to a unsigned long
+for ntohl to process.
+\param[in] std::vector<std::pair<sockaddr_in, SOCKET>>const& vec
+Vector of sockets
+\param[in] std::pair<long, uint16_t> addr
+IP and port to search for
+\return
+The socket found else -1
+*************************************************************************/
+SOCKET SearchConnectedSockets(std::vector<std::pair<sockaddr_in, SOCKET>>const& vec, std::pair<long, uint16_t> addr) {
+	for (std::pair<sockaddr_in, SOCKET> const& i : vec) {
+		if (i.first.sin_addr.S_un.S_addr == addr.first && ntohs(i.first.sin_port) == addr.second) {
+			return i.second;
+		}
+	}
+	return -1;
+}
 
 enum CMDID {
 	UNKNOWN = (unsigned char)0x0,//not used
