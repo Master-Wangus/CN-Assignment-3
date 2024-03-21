@@ -1,0 +1,4 @@
+Download repository:DownLoadRepo
+Sliding Window size:10
+Packet loss rate:0.5
+Ack timer:50
