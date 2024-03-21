@@ -131,11 +131,13 @@
   <ItemGroup>
     <ClCompile Include="..\echoserver.cpp" />
     <ClCompile Include="..\packet.cpp" />
+    <ClCompile Include="..\Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\packet.h" />
     <ClInclude Include="..\taskqueue.h" />
     <ClInclude Include="..\taskqueue.hpp" />
+    <ClInclude Include="..\Utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
