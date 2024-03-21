@@ -21,6 +21,11 @@ Packet::Packet(const ULONG sessionID, const ULONG sequenceNo) : Flag((UCHAR)FLGI
 
 }
 
+size_t Packet::GetFullLength() const
+{
+	return sizeof(UCHAR) + sizeof(ULONG) * 4 + DataLength;
+}
+
 std::string Packet::GetBuffer() const
 {
 	std::string buffer;
@@ -60,8 +65,12 @@ bool Packet::isACK() const
 	return Flag & (UCHAR)FLGID::ACK;
 }
 
-Segment::Segment(const USHORT source, const USHORT dest, const std::string& packet) 
-	: SourcePort(source), DestPort(dest), Length(sizeof(USHORT) * 4 + packet.length()), Checksum(0), Packet(packet) {} // Source + Dest + Length + Checksum = 32
+Segment::Segment(const USHORT source, const USHORT dest, const ::Packet& packet)
+	: SourcePort(source), DestPort(dest), Length(sizeof(USHORT) * 4 + packet.GetFullLength()), Checksum(0), Packet(packet) {} // Source + Dest + Length + Checksum = 32
+
+
+Segment::Segment(const USHORT source, const USHORT dest, const std::string& packet)
+	: SourcePort(source), DestPort(dest), Length(sizeof(USHORT) * 4 + packet.length()), Checksum(0), Packet(DecodePacketNetwork(packet)) {} // Source + Dest + Length + Checksum = 32
 
 std::string Segment::GetBuffer() const
 {
@@ -72,7 +81,7 @@ std::string Segment::GetBuffer() const
 	buffer.append(reinterpret_cast<const char*>(&DestPort), sizeof(DestPort));
 	buffer.append(reinterpret_cast<const char*>(&Length), sizeof(Length));
 	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet;
+	buffer += Packet.GetBuffer();
 
 	newCheckSum = Utils::ToChecksum(buffer);
 	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
@@ -94,7 +103,7 @@ std::string Segment::GetNetworkBuffer() const
 	buffer.append(reinterpret_cast<const char*>(&networkDestPort), sizeof(networkDestPort));
 	buffer.append(reinterpret_cast<const char*>(&networkLength), sizeof(networkLength));
 	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet;
+	buffer += Packet.GetNetworkBuffer();
 
 	newCheckSum = htons(Utils::ToChecksum(buffer));
 	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
@@ -105,11 +114,6 @@ USHORT Segment::UpdateChecksum()
 	USHORT newCheckSum = htons(Utils::ToChecksum(GetNetworkBuffer()));
 	Checksum = htons(newCheckSum);
 	return newCheckSum;
-}
-
-Packet Segment::GetPacket()
-{
-	return DecodePacket(Packet);
 }
 
 Packet DecodePacket(const std::string& packetString)
@@ -160,9 +164,9 @@ Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isCh
 	USHORT DestPort = Utils::StringTo_ntohs(networkSegmentString.substr(2, sizeof(USHORT)));
 	USHORT Length = Utils::StringTo_ntohs(networkSegmentString.substr(4, sizeof(USHORT)));
 	USHORT Checksum = Utils::StringTo_ntohs(networkSegmentString.substr(6, sizeof(USHORT)));
-	std::string Packet = DecodePacketNetwork(networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum))).GetBuffer();
+	std::string PacketStr = networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum));
 
-	Segment seggs = Segment(SourcePort, DestPort, Packet);
+	Segment seggs = Segment(SourcePort, DestPort, PacketStr); // constructor already handles network ordered packet
 	if (seggs.UpdateChecksum() == Checksum)
 		isChecksumBroken = false;
 	else
