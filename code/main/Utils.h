@@ -21,7 +21,11 @@ namespace Utils
 	std::string htonlToString(u_long input);
 	u_long StringTo_ntohl(std::string const& input);
 	u_short StringTo_ntohs(std::string const& input);
+	u_long StringTo_htonl(std::string const& input);
+	u_short StringTo_htons(std::string const& input);
 	std::string HexToString(const std::string& inputstring);
+
+	USHORT ToChecksum(const std::string segment);
 
 	std::filesystem::path OpenFolder();
 }

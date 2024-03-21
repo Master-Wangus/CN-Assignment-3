@@ -130,8 +130,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\echoserver.cpp" />
+    <ClCompile Include="..\packet.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\packet.h" />
     <ClInclude Include="..\taskqueue.h" />
     <ClInclude Include="..\taskqueue.hpp" />
   </ItemGroup>

@@ -3,6 +3,7 @@
 #include <Windows.h>		// windows API
 #include <shlobj.h>			// folder dialog
 #include <iostream>
+#include <bitset>
 
 namespace Utils
 {
@@ -41,6 +42,20 @@ namespace Utils
 		return ntohs(ret);
 	}
 
+	u_long StringTo_htonl(std::string const& input)
+	{
+		u_long ret = 0;
+		std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
+		return htonl(ret);
+	}
+
+	u_short StringTo_htons(std::string const& input)
+	{
+		uint16_t ret = 0;
+		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
+		return htons(ret);
+	}
+
 	/*!***********************************************************************
 	\brief
 	Converts a hex string into human readable string
@@ -58,6 +73,31 @@ namespace Utils
 			output.push_back(byte); //append to message
 		}
 		return output;
+	}
+
+	USHORT ToChecksum(const std::string segment)
+	{
+		// divide each chunk to 16-bits
+		std::vector<std::string> data_segments;
+		for (int i = 0; i < segment.size(); i += 2) {
+			std::string chunk = segment.substr(i, 2);
+			data_segments.push_back(chunk);
+		}
+		// sum all 16-bits
+		std::bitset<16> checksum(0);
+		for (std::string s : data_segments) {
+			std::bitset<8> first(s[0]);
+			std::bitset<8> second(s[1]);
+			std::bitset<16> str_bits(first.to_ulong() * 0x100 + second.to_ulong());
+			checksum = std::bitset<16>(checksum.to_ulong() + str_bits.to_ulong());
+		}
+
+		// obtain 1's compliment of each sum
+		for (int i = 0; i < checksum.size(); i++) {
+			checksum[i] = checksum[i] ^ 1;
+		}
+
+		return checksum.to_ullong();
 	}
 
 	std::filesystem::path OpenFolder()

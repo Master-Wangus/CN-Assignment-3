@@ -18,12 +18,18 @@
     <ClCompile Include="..\echoserver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\packet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\taskqueue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\taskqueue.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\packet.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
