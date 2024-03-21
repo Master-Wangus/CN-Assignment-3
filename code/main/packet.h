@@ -25,7 +25,8 @@ struct Packet
 struct Segment
 {
     Segment(const USHORT source, const USHORT dest, const Packet& packet); // Length is calculated using .length on the packet
-    Segment(const USHORT source, const USHORT dest, const std::string& packet); // Length is calculated using .length on the packet
+    Segment(const USHORT source, const USHORT dest, const std::string& packet); // ASSUMPTION: packet string only contains the packet info 
+                                                                                //             and is in network order
 
     std::string GetBuffer() const; // in bytes! will set the checksum value as well
     std::string GetNetworkBuffer() const; // we return the whole segment in an already nicely network ordered buffer in bytes
