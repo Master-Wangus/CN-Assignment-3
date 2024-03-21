@@ -160,7 +160,7 @@ Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isCh
 	USHORT DestPort = Utils::StringTo_ntohs(networkSegmentString.substr(2, sizeof(USHORT)));
 	USHORT Length = Utils::StringTo_ntohs(networkSegmentString.substr(4, sizeof(USHORT)));
 	USHORT Checksum = Utils::StringTo_ntohs(networkSegmentString.substr(6, sizeof(USHORT)));
-	std::string Packet = networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum));
+	std::string Packet = DecodePacketNetwork(networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum))).GetBuffer();
 
 	Segment seggs = Segment(SourcePort, DestPort, Packet);
 	if (seggs.UpdateChecksum() == Checksum)
