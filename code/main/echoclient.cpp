@@ -37,6 +37,7 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include <thread>
 
 #include "Utils.h"			// helper file
+#include "packet.h"
 
 // forward declarations
 void receive(SOCKET,SOCKET);
@@ -203,27 +204,30 @@ int main(int argc, char** argv)
 	if (UDPsocket == INVALID_SOCKET)
 	{
 		std::cerr << "socket() failed." << std::endl;
+		freeaddrinfo(UDPinfo);
 		WSACleanup();
 		return 2;
 	}
 
-	sockaddr_in  serverUDPAddr;
-	memset(&serverUDPAddr, 0, sizeof(serverUDPAddr));
-	serverUDPAddr.sin_family = AF_INET;
-	serverUDPAddr.sin_port = htons(static_cast<u_short>(std::stoul(UDPServerPort)));
-	serverUDPAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	sockaddr_in  clientUDPAddr;
+	memset(&clientUDPAddr, 0, sizeof(clientUDPAddr));
+	clientUDPAddr.sin_family = AF_INET;
+	clientUDPAddr.sin_port = htons(static_cast<u_short>(std::stoul(UDPClientPort)));
+	//inet_pton(AF_INET, ServerIP.c_str(), &(clientUDPAddr.sin_addr));
 
 	errorCode = bind(
 		UDPsocket,
-		(sockaddr*)&serverUDPAddr,
-		sizeof(serverUDPAddr));
+		(sockaddr*)&clientUDPAddr,
+		sizeof(clientUDPAddr));
 	if (errorCode != NO_ERROR)
 	{
 		std::cerr << "bind() failed." << std::endl;
 		closesocket(UDPsocket);
+		freeaddrinfo(UDPinfo);
 		UDPsocket = INVALID_SOCKET;
 		return 2;
 	}
+	freeaddrinfo(UDPinfo);
 	// -------------------------------------------------------------------------
 	// Send some text.
 	//
@@ -352,6 +356,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 
 			if (text[0] == RSP_DOWNLOAD) // request echo from server, to send back message with response echo code
 			{
+				
 				u_long IP = Utils::StringTo_ntohl(text.substr(1, 4));
 				u_short portNum = Utils::StringTo_ntohs(text.substr(5, 2));
 				u_long sessionID = Utils::StringTo_ntohl(text.substr(7, 4)); // session id
@@ -370,9 +375,28 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					WSACleanup();
 					break;
 				}
+				sockaddr_in sin;
+				int len = sizeof(sin);
+				getsockname(UDPsocket, (struct sockaddr*)&sin, &len);
+				char clientIP[INET_ADDRSTRLEN]; //set buffer to be a macro that decides the length based on the connection type eg ipv4, ipv6 etc etc
+				inet_ntop(AF_INET, &sin.sin_addr, clientIP, INET_ADDRSTRLEN); //getting IP address of client with IPV4
 
+				std::cout << std::endl;
+				std::cout << "Now listening for messages on: " << clientIP<< ':' << ntohs(sin.sin_port) << '\n';
 
-				/// INSERT UDP HERE
+				/// UDP SESSION START ACK
+				std::cout << "Start UDP session\n";
+				// send the acknowledgement to server to start the udp session 
+				std::string UDPstart = "Start UDP"; // temp
+				const int bytesSent = sendto(UDPsocket, UDPstart.c_str(), static_cast<int>(UDPstart.size()), 0, (sockaddr*)&serverAddress, sizeof(serverAddress));
+				if (bytesSent == SOCKET_ERROR)
+				{
+					int error = WSAGetLastError();
+					std::cerr << "send() failed." << std::endl;
+					break;
+				}
+
+				/// UDP SESSSION START
 				while (true)
 				{
 					constexpr size_t BUFFER_SIZE_UDP = 1000;
@@ -383,25 +407,35 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					if (bytesRecieved_UDP == SOCKET_ERROR)
 					{
 						size_t errorCode = WSAGetLastError();
-						if (errorCode == WSAEWOULDBLOCK)
-						{
-							// A non-blocking call returned no data; sleep and try again.
-							using namespace std::chrono_literals;
-							std::this_thread::sleep_for(200ms);
-							continue;
-						}
+						std::cout << "recvfrom() failed.\n";
+						break;
 					}
 					else if (bytesRecieved_UDP == 0) //check if not receiving any messages
 					{
 						std::cout << "hello";
 						break;
 					}
-					buffer_UDP[BUFFER_SIZE_UDP-1] = '\0';
-					text = std::string(buffer_UDP, BUFFER_SIZE_UDP);
-					std::cout
-						<< "Text received:  " << text << "\n"
-						<< "Bytes received: " << bytesRecieved_UDP << "\n"
-						<< std::endl;
+					else
+					{
+						buffer_UDP[BUFFER_SIZE_UDP - 1] = '\0';
+						text = std::string(buffer_UDP, BUFFER_SIZE_UDP);
+
+						Packet packet = Packet::DecodePacketNetwork(text);
+						
+
+						std::cout
+							<< "Text received:  " << text << "\n"
+							<< "Bytes received: " << bytesRecieved_UDP << "\n"
+							<< std::endl;
+					}
+
+					// Send to Server
+					const int bytesSent = sendto(UDPsocket, text.c_str(), static_cast<int>(text.size()), 0, (sockaddr*)&serverAddress, size);
+					if (bytesSent == SOCKET_ERROR)
+					{
+						std::cerr << "send() failed." << std::endl;
+						break;
+					}
 				}
 				//char str[INET_ADDRSTRLEN];
 				//if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
