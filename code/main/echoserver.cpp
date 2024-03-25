@@ -424,6 +424,45 @@ bool execute(SOCKET clientSocket)
 
 	while (true) //loop until client disconnects
 	{
+
+		/// UDP DOWNLOAD
+		if (isDownloading)
+		{
+			sockaddr clientAddr{}; // Client address
+			SecureZeroMemory(&clientAddr, sizeof(clientAddr));
+			int clientAddrSize = sizeof(clientAddr);
+
+			const int bytesRecieved = recvfrom(udpSocket,
+				inputUDP,
+				UDPBUFFER_SIZE - 1,
+				0,
+				&clientAddr,
+				&clientAddrSize);
+			if (bytesRecieved == SOCKET_ERROR)
+			{
+				std::cerr << "recvfrom() failed." << std::endl;
+				break;
+			}
+			else if (bytesRecieved == 0)
+			{
+				std::cerr << "Graceful shutdown." << std::endl;
+				break;
+			}
+			inputUDP[bytesRecieved] = '\0';
+			std::cout << inputUDP << '\n';
+			std::string text(inputUDP, bytesRecieved - 1);
+			Packet packet = Packet::DecodePacketNetwork(text);
+
+			if (packet.isACK()) // Client has recieved the packet
+			{
+				// 1. store the ack no. in a vector or smth
+				// 2. check if packet is out of order
+				// 3. 
+			}
+			// Need to keep track of the ack to quit download state for thread
+		}
+
+		/// TCP reciever
 		const int bytesReceived = recv(clientSocket, inputTCP, TCPBUFFER_SIZE - 1, 0);
 		if (bytesReceived == SOCKET_ERROR)
 		{
@@ -521,42 +560,6 @@ bool execute(SOCKET clientSocket)
 		{
 			std::cout << "Graceful shutdown" << std::endl;
 			break;
-		}
-
-		/// UDP DOWNLOAD
-		if (isDownloading)
-		{
-			sockaddr clientAddr{}; // Client address
-			SecureZeroMemory(&clientAddr, sizeof(clientAddr));
-			int clientAddrSize = sizeof(clientAddr);
-			
-			const int bytesRecieved = recvfrom(udpSocket,
-				inputUDP,
-				UDPBUFFER_SIZE - 1,
-				0,
-				&clientAddr,
-				&clientAddrSize);
-			if (bytesReceived == SOCKET_ERROR)
-			{
-				std::cerr << "recvfrom() failed." << std::endl;
-				break;
-			}
-			else if (bytesReceived == 0)
-			{
-				std::cerr << "Graceful shutdown." << std::endl;
-				break;
-			}
-			inputUDP[bytesReceived] = '\0';
-			std::cout << inputUDP << '\n';
-			std::string text(inputUDP, bytesReceived - 1);
-			Packet packet = Packet::DecodePacketNetwork(text);
-
-			if (packet.isACK()) // Client has recieved the packet
-			{
-				// 1. store the ack no. in a vector or smth
-				// 2. check if packet is out of order
-				// 3. 
-			}
 		}
 	}
 
