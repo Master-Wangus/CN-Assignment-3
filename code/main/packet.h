@@ -13,6 +13,7 @@ enum class FLGID
 struct Packet
 {
     Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart); // Data Packet
+    Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const std::string& packetData); // Data Packet
     Packet(const ULONG sessionID, const ULONG sequenceNo); // Ack Packet
 
     size_t GetFullLength() const; // in bytes!
@@ -35,7 +36,7 @@ struct Packet
 
 struct Segment
 {
-    Segment(const USHORT source, const USHORT dest, const Packet& packet); // Length is calculated using .length on the packet
+    Segment(const USHORT source, const USHORT dest, Packet& packet); // Length is calculated using .length on the packet 
     Segment(const USHORT source, const USHORT dest, const std::string& packet); // ASSUMPTION: packet string only contains the packet info 
                                                                                 //             and is in network order
 
@@ -52,6 +53,4 @@ struct Segment
 
 // Decode Utility Functions
 Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken);
-
-
-
+std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path);

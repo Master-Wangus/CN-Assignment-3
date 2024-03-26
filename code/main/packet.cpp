@@ -1,6 +1,14 @@
 #include "packet.h"
 #include "Utils.h"
+#include <fstream>
+#include <iostream>
 
+constexpr size_t PACKET_SIZE = 1000000; // 1 MB
+enum class FLGID
+{
+	FILE = 0x00,
+	ACK = 0x01
+};
 
 Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart) :
 	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength)
@@ -9,6 +17,11 @@ Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOf
 	{
 		Data.append(*(bufferStart + FileOffset + i), sizeof(UCHAR));
 	}
+}
+
+Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const std::string& packetData) :
+	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength), Data(packetData)
+{
 }
 
 Packet::Packet(const ULONG sessionID, const ULONG sequenceNo) : Flag((UCHAR)FLGID::ACK), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(0), DataLength(0)
@@ -179,4 +192,43 @@ Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isCh
 		isChecksumBroken = true;
 
 	return seggs;
+}
+
+std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path)
+{
+	std::vector<Packet> packets;
+	std::ifstream file(path, std::ios::binary);
+
+	if (!file) 
+	{
+		std::cerr << "Could not open the file: " << path << std::endl;
+		return packets; // Return an empty vector in case of failure
+	}
+
+	unsigned long offset = 0;
+	ULONG sequenceNo = 0;
+	while (file) 
+	{
+		// Read a segment of the file
+		char* buffer = new char[PACKET_SIZE];
+		file.read(buffer, PACKET_SIZE);
+		std::streamsize bytesRead = file.gcount();
+
+		// Set Packet fields
+		Packet packet(sessionID, sequenceNo, offset, static_cast<ULONG>(bytesRead), std::string(buffer, bytesRead));
+
+		// Clean up the temporary buffer
+		delete[] buffer;
+
+		// Only add the packet if we read something
+		if (bytesRead > 0) 
+		{
+			packets.push_back(packet);
+		}
+
+		offset += bytesRead;
+		++sequenceNo;
+	}
+
+	return packets;
 }

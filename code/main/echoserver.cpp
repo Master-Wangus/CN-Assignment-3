@@ -27,9 +27,14 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include "ws2tcpip.h"		// getaddrinfo()
 #include <thread>
 #include "taskqueue.h"
+#include "packet.h"
+#include "Utils.h"
+
 #include <filesystem>
-#include <iostream>
 #include <fstream>
+#include <chrono>
+#include <unordered_map>
+
  
 bool execute(SOCKET clientSocket);
 void disconnect(SOCKET& listenerSocket);
@@ -44,7 +49,6 @@ void disconnect(SOCKET& listenerSocket);
 #include <vector>
 #include "Utils.h"
 #include "packet.h"
-
 
 //  <======================================================================= TO DELETE - START
 
@@ -108,7 +112,8 @@ the hex string to be converted
 \return
 the human readable string
 *************************************************************************/
-std::string HexToString(const std::string& inputstring) {
+std::string HexToString(const std::string& inputstring) 
+{
 	std::string output{};
 	for (size_t i = 0; i < inputstring.length(); i += 2) {
 		std::string byteString = inputstring.substr(i, 2);
@@ -142,7 +147,8 @@ SOCKET SearchConnectedSockets(std::vector<std::pair<sockaddr_in, SOCKET>>const& 
 	return -1;
 }
 
-enum CMDID {
+enum CMDID 
+{
 	UNKNOWN = (unsigned char)0x0,//not used
 	REQ_QUIT = (unsigned char)0x1,
 	REQ_DOWNLOAD = (unsigned char)0x2,
@@ -153,10 +159,45 @@ enum CMDID {
 	DOWNLOAD_ERROR = (unsigned char)0x30
 };
 
+struct Session
+{
+	sockaddr_in ClientSockAddess; // All session info required for sending packets
+	SOCKET ClientUDPSocket;
+
+	ULONG SessionID;
+	std::filesystem::path FilePath;
+	ULONG FileLength;
+	USHORT SourcePort;
+	USHORT DestPort;
+
+	// All session info for window
+	std::chrono::high_resolution_clock::time_point SentTime[WINDOW_SIZE];
+	bool AckMask[WINDOW_SIZE];
+	bool SentMask[WINDOW_SIZE];
+	int LastAckRecv;
+	int LastFrameSent;
+
+	std::mutex DownloadMutex;
+
+	Session(sockaddr_in client, ULONG sessionID, std::filesystem::path filePath, ULONG fileLength, USHORT sourcePort, USHORT destPort)
+		: ClientSockAddess(client), SessionID(sessionID), FilePath(filePath), FileLength(fileLength), SourcePort(sourcePort), DestPort(destPort) {}
+
+	void Execute();
+	void ListenForAck();
+};
+
+constexpr size_t WINDOW_SIZE = 3;
+constexpr float TIME_OUT = 10.f;
+constexpr size_t BUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
+#define ELAPSED_TIME(end, start) std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+
+
 std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
+std::unordered_map<ULONG, Session> SessionsInProgress{};
 uint16_t UDPPortNumber{}, TCPPortNumber{};
 SOCKET listenerSocket{};
-SOCKET udpSocket{};
+SOCKET udpServerSocket{};
+std::mutex SessionMutex;
 
 int main()
 {
@@ -291,11 +332,11 @@ int main()
 	}
 
 
-	udpSocket = socket(
+	udpServerSocket = socket(
 		UDPhints.ai_family,
 		UDPhints.ai_socktype,
 		UDPhints.ai_protocol);
-	if (udpSocket == INVALID_SOCKET)
+	if (udpServerSocket == INVALID_SOCKET)
 	{
 		std::cerr << "udpSocket creation failed." << std::endl;
 		freeaddrinfo(UDPinfo);
@@ -304,13 +345,13 @@ int main()
 	}
 
 	errorCode = bind(
-		udpSocket,
+		udpServerSocket,
 		UDPinfo->ai_addr,
 		static_cast<int>(UDPinfo->ai_addrlen));
 	if (errorCode != NO_ERROR)
 	{
 		std::cerr << "udBind() failed." << std::endl;
-		closesocket(udpSocket);
+		closesocket(udpServerSocket);
 		freeaddrinfo(UDPinfo);
 		WSACleanup();
 		return 2;
@@ -328,7 +369,6 @@ int main()
 	// accept()
 	// -------------------------------------------------------------------------
 
-	//start from here
 
 	SOCKET clientSocket{};
 	sockaddr_in* clientAddr{};
@@ -380,7 +420,7 @@ int main()
 	// -------------------------------------------------------------------------
 
 	shutdown(listenerSocket, SD_BOTH); //close server 
-	closesocket(udpSocket);
+	closesocket(udpServerSocket);
 	closesocket(listenerSocket);
 
 
@@ -406,7 +446,6 @@ bool execute(SOCKET clientSocket)
 
 	std::string parse{};
 	std::getline(fs, parse);
-	//downLoadRepo = parse.substr(parse.find_first_of(" ") + 1);
 	downLoadRepo = parse;
 
 	while (downLoadRepo.empty() || !std::filesystem::exists(downLoadRepo))
@@ -414,7 +453,6 @@ bool execute(SOCKET clientSocket)
 		std::cout << "Enter a valid download repository: ";
 		std::getline(std::cin, downLoadRepo);
 	}
-	
 	// Enable non-blocking I/O on a socket.
 	u_long enable = 1;
 	ioctlsocket(clientSocket, FIONBIO, &enable);
@@ -437,7 +475,7 @@ bool execute(SOCKET clientSocket)
 			SecureZeroMemory(&clientAddr, sizeof(clientAddr));
 			int clientAddrSize = sizeof(clientAddr);
 
-			const int bytesRecieved = recvfrom(udpSocket,
+			const int bytesRecieved = recvfrom(udpServerSocket,
 				inputUDP,
 				UDPBUFFER_SIZE - 1,
 				0,
@@ -515,18 +553,16 @@ bool execute(SOCKET clientSocket)
 				output.append(reinterpret_cast<char*>(&clientPort), sizeof(clientPort));
 				ULONG sessionID{}; /// WESLEY TO INCORPORATE SESSION ID
 
-				//output += htonl(sessionID);
-
 				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
 				output += fileLength;
 
-				//// Setting up of client address
-				//SecureZeroMemory(&clientAddr, sizeof(clientAddr));
-				//clientAddr.sin_family = AF_INET;
-				//memcpy(&clientAddr.sin_addr.S_un.S_addr, &clientIP, 4);
-				//clientAddr.sin_port = htons(ClientUDPportNum);
-
 				isDownloading = true;
+				sockaddr_in clientAddr{};
+				socklen_t clientAddrLen = sizeof(clientAddr);
+				getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
+				ULONG newSessionID = Utils::GenerateUniqueULongKey(SessionsInProgress);
+				std::lock_guard<std::mutex> lock(SessionMutex);
+				SessionsInProgress.try_emplace(newSessionID, clientAddr, newSessionID, filePath, fileLength, UDPPortNumber, ClientUDPportNum);
 			}
 			else // file does not exist
 			{
@@ -594,5 +630,106 @@ void disconnect(SOCKET& listenerSocket)
 		shutdown(listenerSocket, SD_BOTH);
 		closesocket(listenerSocket);
 		listenerSocket = INVALID_SOCKET;
+	}
+}
+
+void Session::Execute() // send thread function
+{
+	bool Sent = false;
+	std::vector<Packet> packets = PackFromFile(SessionID, FilePath);
+	if (packets.size() <= 0) // file reading has encountered an error
+	{
+		return;
+	}
+	int currentPacketNo = 0;
+	while (!Sent)
+	{
+		for (size_t i = 0; i < WINDOW_SIZE; i++)
+		{
+			AckMask[i] = false;
+			SentMask[i] = false;
+		}
+		LastAckRecv = -1;
+		LastFrameSent = LastAckRecv + WINDOW_SIZE;
+
+		/* Send current buffer with sliding window */
+		bool Done = false;
+		while (!Done)
+		{
+
+			/* Check window ack mask, shift window if possible */
+			if (AckMask[0]) {
+				int shift = 1;
+				for (int i = 1; i < WINDOW_SIZE; i++)
+				{
+					if (!AckMask[i]) break;
+					shift += 1;
+				}
+				for (int i = 0; i < WINDOW_SIZE - shift; i++)
+				{
+					SentMask[i] = SentMask[i + shift];
+					AckMask[i] = AckMask[i + shift];
+					SentTime[i] = SentTime[i + shift];
+				}
+				for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++) {
+					SentMask[i] = false;
+					AckMask[i] = false;
+				}
+				LastAckRecv += shift;
+				LastFrameSent = LastAckRecv + WINDOW_SIZE;
+			}
+			int CurrentSequenceNo = 0;
+			/* Send frames that has not been sent or has timed out */
+			for (int i = 0; i < WINDOW_SIZE; i++)
+			{
+				CurrentSequenceNo = LastAckRecv + i + 1;
+
+				if (CurrentSequenceNo < packets.size())
+				{
+					if (!SentMask[i] || (!AckMask[i] && (ELAPSED_TIME(std::chrono::high_resolution_clock::now(), SentTime[i]) > TIME_OUT)))
+					{
+						Segment seggs(SourcePort, DestPort, packets[i]);
+
+						sendto(ClientUDPSocket, seggs.GetNetworkBuffer().c_str(), seggs.Length, 0, (struct sockaddr*)(&ClientSockAddess), sizeof(ClientSockAddess));
+						SentMask[i] = true;
+						SentTime[i] = std::chrono::high_resolution_clock::now();
+					}
+				}
+			}
+
+			/* Move to next buffer if all frames in current buffer has been acked */
+			if (LastAckRecv >= CurrentSequenceNo - 1)
+				Done = true;
+		}
+
+		currentPacketNo += 1;
+		if (Done)
+		{
+			break;
+		}
+	}
+}
+
+void Session::ListenForAck()
+{
+	while (true) 
+	{
+		char input[BUFFER_SIZE]; //set char buffer as char = uint8_t
+		int clientSize = sizeof(ClientSockAddess);
+		recvfrom(ClientUDPSocket, input, BUFFER_SIZE,
+			MSG_WAITALL, (struct sockaddr*)&ClientSockAddess,
+			&clientSize);
+		ack_error = read_ack(&ack_seq_num, &ack_neg, ack);
+		
+		if (!ack_error && ack_seq_num > lar && ack_seq_num <= lfs) {
+			if (!ack_neg) {
+				window_ack_mask[ack_seq_num - (lar + 1)] = true;
+			}
+			else {
+				window_sent_time[ack_seq_num - (lar + 1)] = TMIN;
+			}
+		}
+
+		window_info_mutex.unlock();
 	}
 }
