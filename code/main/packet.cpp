@@ -227,3 +227,33 @@ std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::p
 
 	return packets;
 }
+
+std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath)
+{
+	std::vector<ULONG> segmentIDs;
+	std::ofstream outputFile(filePath, std::ios::binary | std::ios::out);
+
+	for (ULONG segmentID{}; segmentID < packetVector.size(); ++segmentID)
+	{
+		if ((segmentID) != packetVector[segmentID].SequenceNo)
+		{
+			segmentIDs.push_back(segmentID);
+		}
+		else
+		{
+			outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
+		}
+
+	}
+	outputFile.close();
+
+	if (outputFile.bad()) 
+	{
+		std::cerr << "An error occurred while writing to the file: " << filePath << std::endl;
+	}
+	else {
+		std::cout << "File successfully reconstructed from packets." << std::endl;
+	}
+
+	return segmentIDs;
+}

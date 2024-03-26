@@ -54,3 +54,5 @@ struct Segment
 // Decode Utility Functions
 Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken);
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path);
+std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath); // 
+                                                                          // returns segments ids that are missing if unpack is unsuccessful
