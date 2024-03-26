@@ -3,6 +3,13 @@
 #include <string>
 #include <Windows.h>
 
+
+enum class FLGID
+{
+    FILE = (unsigned char)0x00,
+    ACK = (unsigned char)0x01,
+};
+
 struct Packet
 {
     Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart); // Data Packet
@@ -12,6 +19,10 @@ struct Packet
     std::string GetBuffer() const; // in bytes!
     std::string GetNetworkBuffer() const; // we return the whole packet in an already nicely network ordered buffer in bytes
     bool isACK() const;
+
+    static Packet DecodePacket(const std::string& packetString);
+    static Packet DecodePacketNetwork(const std::string& networkPacketString);
+
 
     // Packet variables are to be stored in host order
     UCHAR Flag;
@@ -40,8 +51,6 @@ struct Segment
 };
 
 // Decode Utility Functions
-Packet DecodePacket(const std::string& packetString);
-Packet DecodePacketNetwork(const std::string& networkPacketString);
 Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken);
 
 
