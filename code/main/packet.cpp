@@ -4,11 +4,6 @@
 #include <iostream>
 
 constexpr size_t PACKET_SIZE = 1000000; // 1 MB
-enum class FLGID
-{
-	FILE = 0x00,
-	ACK = 0x01
-};
 
 Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart) :
 	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength)
@@ -226,7 +221,7 @@ std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::p
 			packets.push_back(packet);
 		}
 
-		offset += bytesRead;
+		offset += static_cast<unsigned long>(bytesRead);
 		++sequenceNo;
 	}
 

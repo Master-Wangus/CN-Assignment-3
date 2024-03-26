@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 #include <Windows.h>
-
+#include <filesystem>
 
 enum class FLGID
 {
@@ -36,7 +36,7 @@ struct Packet
 
 struct Segment
 {
-    Segment(const USHORT source, const USHORT dest, Packet& packet); // Length is calculated using .length on the packet 
+    Segment(const USHORT source, const USHORT dest, const Packet& packet); // Length is calculated using .length on the packet 
     Segment(const USHORT source, const USHORT dest, const std::string& packet); // ASSUMPTION: packet string only contains the packet info 
                                                                                 //             and is in network order
 

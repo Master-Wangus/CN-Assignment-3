@@ -17,6 +17,10 @@
 #include <Bits.h>
 #include <unordered_map>
 #include <random>
+#include <limits>
+
+#undef max
+#undef min
 
 namespace Utils
 {
