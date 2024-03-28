@@ -53,14 +53,15 @@ enum CMDID {
 	DOWNLOAD_ERROR = (unsigned char)0x30
 };
 
-
+std::string g_downloadPath;
+std::string g_fileName;
 // This program requires one extra command-line parameter: a server hostname.
 int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, 
-				downloadPath{}, slidingWindowSz{}, packetLossRate{};
+				slidingWindowSz{}, packetLossRate{};
 
 	std::cout << "Server IP Address: ";
 	std::cin >> ServerIP;
@@ -79,7 +80,7 @@ int main(int argc, char** argv)
 	std::cout << std::endl;
 
 	std::cout << "Path to store files: ";
-	std::cin >> downloadPath;
+	std::cin >> g_downloadPath;
 	std::cout << std::endl;
 
 	std::cout << "Sliding window size: ";
@@ -291,6 +292,7 @@ int main(int argc, char** argv)
 			output.append(reinterpret_cast<char*>(&messageSz), sizeof(messageSz));
 			// file name
 			output += filePath;
+			g_fileName = filePath;
 		}
 		else 
 		{
@@ -360,7 +362,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				u_long IP = Utils::StringTo_ntohl(text.substr(1, 4));
 				u_short portNum = Utils::StringTo_ntohs(text.substr(5, 2));
 				u_long sessionID = Utils::StringTo_ntohl(text.substr(7, 4)); // session id
-				std::string msg = text.substr(11); // file length? brief never specify btyes
+				std::string fileLength = text.substr(11); // file length? brief never specify btyes
 
 				//connect to server (optional)
 				struct sockaddr_in serverAddress;
@@ -395,15 +397,15 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					std::cerr << "send() failed." << std::endl;
 					break;
 				}
-
+				std::filesystem::path filePath(g_downloadPath + "\\" + g_fileName);
+				std::vector<Packet> recievedPackets;
 				/// UDP SESSSION START
 				while (true)
 				{
-					constexpr size_t BUFFER_SIZE_UDP = 1000;
-					char buffer_UDP[BUFFER_SIZE_UDP]{};
+					char buffer_UDP[PACKET_SIZE]{};
 
 					int size = sizeof(serverAddress);
-					int bytesRecieved_UDP = recvfrom(UDPsocket, buffer_UDP, BUFFER_SIZE_UDP - 1, 0, (sockaddr*)&serverAddress, &size);
+					int bytesRecieved_UDP = recvfrom(UDPsocket, buffer_UDP, PACKET_SIZE - 1, 0, (sockaddr*)&serverAddress, &size);
 					if (bytesRecieved_UDP == SOCKET_ERROR)
 					{
 						size_t errorCode = WSAGetLastError();
@@ -412,55 +414,25 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					}
 					else if (bytesRecieved_UDP == 0) //check if not receiving any messages
 					{
-						std::cout << "hello";
+						std::cout << "No bytes have been recieved.\n";
 						break;
 					}
 					else
 					{
-						buffer_UDP[BUFFER_SIZE_UDP - 1] = '\0';
-						text = std::string(buffer_UDP, BUFFER_SIZE_UDP);
+						buffer_UDP[bytesRecieved_UDP] = '\0';
+						text = std::string(buffer_UDP, bytesRecieved_UDP);
 
-						Packet packet = Packet::DecodePacketNetwork(text);
-						
-
-						std::cout
-							<< "Text received:  " << text << "\n"
-							<< "Bytes received: " << bytesRecieved_UDP << "\n"
-							<< std::endl;
-					}
-
-					// Send to Server
-					const int bytesSent = sendto(UDPsocket, text.c_str(), static_cast<int>(text.size()), 0, (sockaddr*)&serverAddress, size);
-					if (bytesSent == SOCKET_ERROR)
-					{
-						std::cerr << "send() failed." << std::endl;
-						break;
+						if (text[0] == static_cast<u_char>(FLGID::FIN))
+						{
+							std::cout << "End packet recieved\n";
+							break;
+						}
+						recievedPackets.emplace_back(text); // Add the packets 
 					}
 				}
-				//char str[INET_ADDRSTRLEN];
-				//if (inet_ntop(AF_INET, IP.c_str(), str, INET_ADDRSTRLEN)) //convert the IP to human readable string
-				//{
-				//	message += std::string(str) + ':' + std::to_string(Utils::StringTo_ntohs(portNum)) + '\n';  //append the port number and ip to the final message
-				//}
-				//while (msg.length() < msgLength) //if the message is shorter than the indicated message length
-				//{
-				//	//to receive the rest of the message
-				//	char buffer[BUFFER_SIZE];
-				//	int bytesReceived = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
-				//	if (!bytesReceived) { // error checking or to break out of loop
-				//		break;
-				//	}
 
-				//	buffer[bytesReceived] = '\0';
-				//	msg += std::string(buffer, bytesReceived); //append the message together
-				//}
-				//message += msg;
-
-				//if (text[0] == REQ_DOWNLOAD) 
-				//{
-				//	text[0] = REQ_DOWNLOAD;
-				//	send(clientSocket, text.c_str(), static_cast<int>(text.length()), 0);
-				//}
+				UnpackToFile(recievedPackets, filePath);
+				std::cout << "Download complete\n";
 				
 			}
 			else if (text[0] == RSP_LISTFILES) 

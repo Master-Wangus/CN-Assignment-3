@@ -11,14 +11,22 @@
 */
 /* End Header
 *******************************************************************/
+#pragma once
 
 #include <string>
 #include <filesystem>
 #include <Bits.h>
+#include <unordered_map>
+#include <random>
+#include <limits>
+
+#undef max
+#undef min
 
 namespace Utils
 {
 	std::string htonlToString(u_long input);
+	std::string htonsToString(u_short input);
 	u_long StringTo_ntohl(std::string const& input);
 	u_short StringTo_ntohs(std::string const& input);
 	u_long StringTo_htonl(std::string const& input);
@@ -26,6 +34,7 @@ namespace Utils
 	std::string HexToString(const std::string& inputstring);
 
 	USHORT ToChecksum(const std::string segment);
-
 	std::filesystem::path OpenFolder();
+
+	ULONG GenerateUniqueULongKey(const std::vector<ULONG> keyvec);
 }

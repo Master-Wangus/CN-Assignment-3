@@ -422,6 +422,8 @@ bool execute(SOCKET clientSocket)
 
 	bool isDownloading = false;
 
+	std::vector<Packet> filePackets;
+
 	while (true) //loop until client disconnects
 	{
 
@@ -440,7 +442,8 @@ bool execute(SOCKET clientSocket)
 				&clientAddrSize);
 			if (bytesRecieved == SOCKET_ERROR)
 			{
-				std::cerr << "recvfrom() failed." << std::endl;
+				std::cout << WSAGetLastError();
+				std::cerr << " recvfrom() failed." << std::endl;
 				break;
 			}
 			else if (bytesRecieved == 0)
@@ -450,7 +453,7 @@ bool execute(SOCKET clientSocket)
 			}
 			inputUDP[bytesRecieved] = '\0';
 			std::cout << inputUDP << '\n';
-			std::string text(inputUDP, bytesRecieved - 1);
+			std::string text(inputUDP, bytesRecieved);
 			Packet packet = Packet::DecodePacketNetwork(text);
 
 			if (packet.isACK()) // Client has recieved the packet
@@ -459,7 +462,38 @@ bool execute(SOCKET clientSocket)
 				// 2. check if packet is out of order
 				// 3. 
 			}
-			// Need to keep track of the ack to quit download state for thread
+
+			for (size_t i{}; i < filePackets.size(); ++i)
+			{
+				// Send to Client
+				std::string packet = filePackets[i].GetNetworkBuffer();
+				const int bytesSent = sendto(udpSocket, packet.c_str(), static_cast<int>(packet.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+				if (bytesSent == SOCKET_ERROR)
+				{
+					std::cout << WSAGetLastError();
+					std::cerr << " send() failed." << std::endl;
+					break;
+				}
+			}
+
+			std::string endPacket = Packet::GetEndPacket();
+			// Send to Server
+			const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+			if (bytesSent == SOCKET_ERROR)
+			{
+				std::cerr << "send() failed." << std::endl;
+				break;
+			}
+
+			///// End of file download, might need to track in other ways
+			//if (packet.SequenceNo == filePackets.size() - 1)
+			//{
+			//	isDownloading = false;
+			//	filePackets.clear(); // Reset the download Packets
+			//}
+
+			isDownloading = false;
+			filePackets.clear(); // Reset the download Packets
 		}
 
 		/// TCP reciever
@@ -514,7 +548,7 @@ bool execute(SOCKET clientSocket)
 
 				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
 				output += fileLength;
-
+				filePackets =  PackFromFile(sessionID, filePath);
 				//// Setting up of client address
 				//SecureZeroMemory(&clientAddr, sizeof(clientAddr));
 				//clientAddr.sin_family = AF_INET;
@@ -534,18 +568,19 @@ bool execute(SOCKET clientSocket)
 		{
 			std::string listOfFiles{ RSP_LISTFILES };
 
-			size_t NumOfFiles{}, lengthOFFileList{};
+			u_short NumOfFiles{};
+			u_long lengthOfFileList{};
 			std::vector<std::string>FileNames{};
 			for (auto const& file : std::filesystem::directory_iterator{ downLoadRepo })
 			{
 				++NumOfFiles;
 				std::string fileName = file.path().filename().string();
 				FileNames.emplace_back(fileName);
-				lengthOFFileList += fileName.size() + 4; // calculate the length of file list
+				lengthOfFileList += static_cast<u_long>(fileName.size()) + 4; // calculate the length of file list
 			}
 
-			listOfFiles += htonsToString(htons(static_cast<uint16_t>(NumOfFiles)));
-			listOfFiles += htonlToString(htonl(static_cast<uint16_t>(lengthOFFileList)));
+			listOfFiles += Utils::htonsToString(NumOfFiles);
+			listOfFiles += Utils::htonlToString(lengthOfFileList);
 
 			for (std::string const& i : FileNames)
 			{
