@@ -19,7 +19,7 @@ Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOf
 {
 }
 
-Packet::Packet(const ULONG sessionID, const ULONG sequenceNo) : Flag((UCHAR)FLGID::ACK), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(0), DataLength(0)
+Packet::Packet(const bool isAcked, const ULONG sessionID, const ULONG sequenceNo) : Flag((isAcked) ? (UCHAR)FLGID::ACK : (UCHAR)FLGID::NAK), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(0), DataLength(0)
 {
 
 }
@@ -93,7 +93,17 @@ Packet Packet::DecodePacket(const std::string& packetString)
 		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data.c_str());
 	}
 	else
-		return Packet(SessionID, SequenceNo);
+	{
+		if (Flag & (UCHAR)FLGID::ACK)
+		{
+			return Packet(true, SessionID, SequenceNo);
+		}
+		else
+		{
+			return Packet(false, SessionID, SequenceNo);
+
+		}
+	}
 }
 
 Packet Packet::DecodePacketNetwork(const std::string& networkPacketString)
@@ -111,12 +121,27 @@ Packet Packet::DecodePacketNetwork(const std::string& networkPacketString)
 		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data.c_str());
 	}
 	else
-		return Packet(SessionID, SequenceNo);
+	{
+		if (Flag & (UCHAR)FLGID::ACK)
+		{
+			return Packet(true, SessionID, SequenceNo);
+		}
+		else
+		{
+			return Packet(false, SessionID, SequenceNo);
+
+		}
+	}
 }
 
 bool Packet::isACK() const
 {
 	return Flag & (UCHAR)FLGID::ACK;
+}
+
+bool Packet::isNAK() const
+{
+	return Flag & (UCHAR)FLGID::NAK;
 }
 
 Segment::Segment(const USHORT source, const USHORT dest, const ::Packet& packet)
@@ -187,6 +212,24 @@ Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isCh
 		isChecksumBroken = true;
 
 	return seggs;
+}
+
+bool IfAckReturnSequence(const std::string& networkSegmentString, bool& isChecksumBroken, bool& isAcked, ULONG& sequenceNo)
+{
+	Segment seggs = DecodeSegmentNetwork(networkSegmentString, isChecksumBroken);
+	if (seggs.Packet.isACK() || seggs.Packet.isNAK())
+	{
+		sequenceNo = seggs.Packet.SequenceNo;
+		if (seggs.Packet.isACK())
+		{
+			isAcked = true;
+		}
+		else if(seggs.Packet.isNAK())
+			isAcked = false;
+		return true;
+	}
+	else
+		return false;
 }
 
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path)

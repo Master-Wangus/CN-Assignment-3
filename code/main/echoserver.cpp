@@ -14,6 +14,11 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 /* End Header
 *******************************************************************/
 
+constexpr size_t WINDOW_SIZE = 3;
+constexpr float TIME_OUT = 10.f;
+constexpr size_t BUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
+#define ELAPSED_TIME(end, start) std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+
 ///*******************************************************************************
 // * A multi-threaded TCP/IP server application
 // ******************************************************************************/
@@ -22,110 +27,29 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include "Windows.h"		// Entire Win32 API...
- // #include "winsock2.h"	// ...or Winsock alone
-#include "ws2tcpip.h"		// getaddrinfo()
-#include <thread>
-#include "taskqueue.h"
-#include "packet.h"
-#include "Utils.h"
-
-#include <filesystem>
-#include <fstream>
-#include <chrono>
-#include <unordered_map>
-
- 
-bool execute(SOCKET clientSocket);
-void disconnect(SOCKET& listenerSocket);
-
 // Tell the Visual Studio linker to include the following library in linking.
 // Alternatively, we could add this file to the linker command-line parameters,
 // but including it in the source code simplifies the configuration.
 #pragma comment(lib, "ws2_32.lib")
 
-#include <iostream>			// cout, cerr
-#include <string>			// string
-#include <vector>
+
+#include "Windows.h"		// Entire Win32 API...
+#include "ws2tcpip.h"		// getaddrinfo()
+
+bool execute(SOCKET clientSocket);
+void disconnect(SOCKET& listenerSocket);
+
+#include "taskqueue.h"
 #include "Utils.h"
 #include "packet.h"
+#include <fstream>
+#include <chrono>
 
-//  <======================================================================= TO DELETE - START
-
-/*!***********************************************************************
-\brief
-Changes the message length in network order to its string representation in hex form through binary manipulation.
-\param[in, out] long
-the long that is the message length to be converted to string
-\return
-The string representing the message length in network order
-*************************************************************************/
-std::string htonlToString(u_long input) {
-	std::string output(sizeof(unsigned long), '\0'); // Initialize string with the size of u_long, filled with '\0'
-	std::memcpy(&output[0], &input, sizeof(unsigned long)); // Copy the binary data of val into the string
-	return output;
-}
-
-
-std::string htonsToString(short input) {
-	std::string output(sizeof(short), '\0'); // Initialize string with the size of u_long, filled with '\0'
-	std::memcpy(&output[0], &input, sizeof(short)); // Copy the binary data of val into the string
-	return output;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a unsigned long
-for ntohl to process.
-\param[in, out] string
-the input string representing the length of the message in network order
-\return
-the long representing the system order
-*************************************************************************/
-u_long StringTontohl(std::string const& input) {
-	u_long ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
-	return ret;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a short
-for ntohs to process.
-\param[in, out] string
-the input string representing the length of the message in network order
-\return
-the long representing the system order
-*************************************************************************/
-uint16_t StringTontohs(std::string const& input) {
-	uint16_t ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(uint16_t)); // copy binary data into the string
-	return ret;
-}
-
-
-/*!***********************************************************************
-\brief
-Converts a hex string into human readable string
-\param[in, out] inputstring
-the hex string to be converted
-\return
-the human readable string
-*************************************************************************/
-std::string HexToString(const std::string& inputstring) 
-{
-	std::string output{};
-	for (size_t i = 0; i < inputstring.length(); i += 2) {
-		std::string byteString = inputstring.substr(i, 2);
-		//convert to unsigned long in hex format then cast to char
-		char byte = static_cast<char>(std::stoul(byteString, nullptr, 16));
-		output.push_back(byte); //append to message
-	}
-	return output;
-}
-
-//  =======================================================================> TO DELETE - END
-
+std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
+std::vector<ULONG> SessionsInProgress{};
+uint16_t UDPPortNumber{}, TCPPortNumber{};
+SOCKET listenerSocket{};
+std::mutex SessionMutex;
 
 /*!***********************************************************************
 \brief
@@ -161,43 +85,61 @@ enum CMDID
 
 struct Session
 {
-	sockaddr_in ClientSockAddess; // All session info required for sending packets
-	SOCKET ClientUDPSocket;
+	sockaddr_in ClientSockAddess{}; // All session info required for sending/receving packets
+	SOCKET ServerUDPSocket{};
 
-	ULONG SessionID;
-	std::filesystem::path FilePath;
-	ULONG FileLength;
-	USHORT SourcePort;
-	USHORT DestPort;
+	ULONG SessionID{};
+	std::filesystem::path FilePath{};
+	ULONG FileLength{};
+	USHORT SourcePort{};
+	USHORT DestPort{};
 
 	// All session info for window
-	std::chrono::high_resolution_clock::time_point SentTime[WINDOW_SIZE];
-	bool AckMask[WINDOW_SIZE];
-	bool SentMask[WINDOW_SIZE];
-	int LastAckRecv;
-	int LastFrameSent;
+	std::chrono::high_resolution_clock::time_point SentTime[WINDOW_SIZE]{};
+	bool AckMask[WINDOW_SIZE]{};
+	bool SentMask[WINDOW_SIZE]{};
+	int LastAckRecv{};
+	int LastFrameSent{};
 
 	std::mutex DownloadMutex;
+	std::vector<Packet> PacketsToSend{};
 
+	Session() = default;
 	Session(sockaddr_in client, ULONG sessionID, std::filesystem::path filePath, ULONG fileLength, USHORT sourcePort, USHORT destPort)
-		: ClientSockAddess(client), SessionID(sessionID), FilePath(filePath), FileLength(fileLength), SourcePort(sourcePort), DestPort(destPort) {}
+		: ClientSockAddess(client), SessionID(sessionID), FilePath(filePath), FileLength(fileLength), SourcePort(sourcePort), DestPort(destPort), PacketsToSend(PackFromFile(SessionID, FilePath))
+
+	{
+		ServerUDPSocket = socket(
+			AF_INET, // IPv4
+			SOCK_DGRAM, // Best effort
+			IPPROTO_UDP); // Could be 0 for autodetect, but best effort over IPv4 is always UDP.
+
+		if (ServerUDPSocket == INVALID_SOCKET)
+		{
+			std::cerr << "udpSocket creation failed." << std::endl;
+			WSACleanup();
+		}
+
+		int errorCode = bind(
+			ServerUDPSocket,
+			(const struct sockaddr*)&ClientSockAddess,
+			sizeof(ClientSockAddess));
+		if (errorCode != NO_ERROR)
+		{
+			std::cerr << "udBind() failed." << std::endl;
+			closesocket(ServerUDPSocket);
+			WSACleanup();
+		}
+	}
+
+	~Session()
+	{
+		closesocket(ServerUDPSocket);
+	}
 
 	void Execute();
 	void ListenForAck();
 };
-
-constexpr size_t WINDOW_SIZE = 3;
-constexpr float TIME_OUT = 10.f;
-constexpr size_t BUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
-#define ELAPSED_TIME(end, start) std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-
-
-std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
-std::unordered_map<ULONG, Session> SessionsInProgress{};
-uint16_t UDPPortNumber{}, TCPPortNumber{};
-SOCKET listenerSocket{};
-SOCKET udpServerSocket{};
-std::mutex SessionMutex;
 
 int main()
 {
@@ -239,9 +181,6 @@ int main()
 		return 0;
 	}
 	std::string UDPportString{ std::to_string(UDPPortNumber) };
-
-	
-
 
 	// -------------------------------------------------------------------------
 	// Resolve own host name into IP addresses (in a singly-linked list).
@@ -313,51 +252,6 @@ int main()
 		return 2;
 	}
 
-	// Object hints indicates which protocols to use to fill in the info.
-	addrinfo UDPhints{};
-	SecureZeroMemory(&UDPhints, sizeof(UDPhints));
-	UDPhints.ai_family = AF_INET;			// IPv4
-	// For TCP use SOCK_STREAM instead of SOCK_DGRAM.
-	UDPhints.ai_socktype = SOCK_DGRAM;		// Best effort
-	// Could be 0 for autodetect, but best effort over IPv4 is always UDP.
-	UDPhints.ai_protocol = IPPROTO_UDP;	// UDP
-	
-	addrinfo* UDPinfo = nullptr;
-	errorCode = getaddrinfo(hostName, UDPportString.c_str(), &UDPhints, &UDPinfo);
-	if ((errorCode) || (UDPinfo == nullptr))
-	{
-		std::cerr << "getaddrinfo() failed." << std::endl;
-		WSACleanup();
-		return errorCode;
-	}
-
-
-	udpServerSocket = socket(
-		UDPhints.ai_family,
-		UDPhints.ai_socktype,
-		UDPhints.ai_protocol);
-	if (udpServerSocket == INVALID_SOCKET)
-	{
-		std::cerr << "udpSocket creation failed." << std::endl;
-		freeaddrinfo(UDPinfo);
-		WSACleanup();
-		return 1;
-	}
-
-	errorCode = bind(
-		udpServerSocket,
-		UDPinfo->ai_addr,
-		static_cast<int>(UDPinfo->ai_addrlen));
-	if (errorCode != NO_ERROR)
-	{
-		std::cerr << "udBind() failed." << std::endl;
-		closesocket(udpServerSocket);
-		freeaddrinfo(UDPinfo);
-		WSACleanup();
-		return 2;
-	}
-	freeaddrinfo(UDPinfo);
-
 	std::cout << "\nServer IP Address: " << hostName << std::endl;
 	std::cout << "Server TCP Port Number: " << TCPportString << std::endl;
 	std::cout << "Server UDP Port Number: " << UDPportString << std::endl;
@@ -420,7 +314,6 @@ int main()
 	// -------------------------------------------------------------------------
 
 	shutdown(listenerSocket, SD_BOTH); //close server 
-	closesocket(udpServerSocket);
 	closesocket(listenerSocket);
 
 
@@ -459,50 +352,17 @@ bool execute(SOCKET clientSocket)
 
 	constexpr size_t TCPBUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
 	char inputTCP[TCPBUFFER_SIZE]; //set char buffer as char = uint8_t
-
-	constexpr size_t UDPBUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
-	char inputUDP[UDPBUFFER_SIZE]; //set char buffer as char = uint8_t
-
 	bool isDownloading = false;
 
 	while (true) //loop until client disconnects
 	{
-
+		Session* CurrentThreadSession = nullptr;
 		/// UDP DOWNLOAD
-		if (isDownloading)
+		if (isDownloading && CurrentThreadSession != nullptr)
 		{
-			sockaddr clientAddr{}; // Client address
-			SecureZeroMemory(&clientAddr, sizeof(clientAddr));
-			int clientAddrSize = sizeof(clientAddr);
-
-			const int bytesRecieved = recvfrom(udpServerSocket,
-				inputUDP,
-				UDPBUFFER_SIZE - 1,
-				0,
-				&clientAddr,
-				&clientAddrSize);
-			if (bytesRecieved == SOCKET_ERROR)
-			{
-				std::cerr << "recvfrom() failed." << std::endl;
-				break;
-			}
-			else if (bytesRecieved == 0)
-			{
-				std::cerr << "Graceful shutdown." << std::endl;
-				break;
-			}
-			inputUDP[bytesRecieved] = '\0';
-			std::cout << inputUDP << '\n';
-			std::string text(inputUDP, bytesRecieved - 1);
-			Packet packet = Packet::DecodePacketNetwork(text);
-
-			if (packet.isACK()) // Client has recieved the packet
-			{
-				// 1. store the ack no. in a vector or smth
-				// 2. check if packet is out of order
-				// 3. 
-			}
-			// Need to keep track of the ack to quit download state for thread
+			CurrentThreadSession->Execute();
+			delete CurrentThreadSession;
+			isDownloading = false;
 		}
 
 		/// TCP reciever
@@ -535,8 +395,8 @@ bool execute(SOCKET clientSocket)
 		else if (text[0] == REQ_DOWNLOAD) //check 1st byte  == echo
 		{
 			std::string clientIP{ text.substr(1, 4) }; //get the ip of the client requesting UDP file download
-			uint16_t ClientUDPportNum{ Utils::StringTo_ntohs(text.substr(5, 2)) }; //get the client UDP port numba in host order bytes
-			u_long fileNameLength{ Utils::StringTo_ntohl(text.substr(7, 4)) }; //get the message length in host order bytes
+			USHORT ClientUDPportNum{ Utils::StringTo_ntohs(text.substr(5, 2)) }; //get the client UDP port numba in host order bytes
+			ULONG fileNameLength{ Utils::StringTo_ntohl(text.substr(7, 4)) }; //get the message length in host order bytes
 			std::string filename{ text.substr(11) }; //get the message
 
 			std::string output{};
@@ -551,18 +411,18 @@ bool execute(SOCKET clientSocket)
 				output.append(reinterpret_cast<char*>(&serverAddr.sin_addr.S_un.S_addr), sizeof(serverAddr.sin_addr.S_un.S_addr));
 				u_short clientPort = htons(UDPPortNumber);
 				output.append(reinterpret_cast<char*>(&clientPort), sizeof(clientPort));
-				ULONG sessionID{}; /// WESLEY TO INCORPORATE SESSION ID
 
 				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
 				output += fileLength;
 
-				isDownloading = true;
 				sockaddr_in clientAddr{};
+				SecureZeroMemory(&clientAddr, sizeof(clientAddr));
 				socklen_t clientAddrLen = sizeof(clientAddr);
 				getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
-				ULONG newSessionID = Utils::GenerateUniqueULongKey(SessionsInProgress);
 				std::lock_guard<std::mutex> lock(SessionMutex);
-				SessionsInProgress.try_emplace(newSessionID, clientAddr, newSessionID, filePath, fileLength, UDPPortNumber, ClientUDPportNum);
+				ULONG newSessionID = Utils::GenerateUniqueULongKey(SessionsInProgress);
+				CurrentThreadSession = new Session(clientAddr, newSessionID, filePath, static_cast<ULONG>(std::filesystem::file_size(filePath)), (USHORT)UDPPortNumber, ClientUDPportNum);
+				isDownloading = true;
 			}
 			else // file does not exist
 			{
@@ -585,8 +445,8 @@ bool execute(SOCKET clientSocket)
 				lengthOFFileList += fileName.size() + 4; // calculate the length of file list
 			}
 
-			listOfFiles += htonsToString(htons(static_cast<uint16_t>(NumOfFiles)));
-			listOfFiles += htonlToString(htonl(static_cast<uint16_t>(lengthOFFileList)));
+			listOfFiles += Utils::htonlToString(htons(static_cast<uint16_t>(NumOfFiles)));
+			listOfFiles += Utils::htonlToString(htonl(static_cast<uint16_t>(lengthOFFileList)));
 
 			for (std::string const& i : FileNames)
 			{
@@ -610,7 +470,8 @@ bool execute(SOCKET clientSocket)
 	
 	{
 		std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
-		for (size_t i{}; i < connectedSockets.size(); ++i) {
+		for (size_t i{}; i < connectedSockets.size(); ++i) 
+		{
 			std::pair<sockaddr_in, SOCKET> tmp = connectedSockets[i];
 			if ((tmp.first.sin_addr.S_un.S_addr == clientAddr.sin_addr.S_un.S_addr && tmp.first.sin_port == clientAddr.sin_port) && tmp.second == clientSocket) {
 				connectedSockets.erase(connectedSockets.begin() + i);
@@ -635,14 +496,12 @@ void disconnect(SOCKET& listenerSocket)
 
 void Session::Execute() // send thread function
 {
-	bool Sent = false;
-	std::vector<Packet> packets = PackFromFile(SessionID, FilePath);
-	if (packets.size() <= 0) // file reading has encountered an error
+	if (PacketsToSend.size() <= 0) // file reading has encountered an error
 	{
 		return;
 	}
-	int currentPacketNo = 0;
-	while (!Sent)
+	std::thread ReceiverThread(&Session::ListenForAck, this);
+	for (int currentPacketNo{}; currentPacketNo < PacketsToSend.size(); currentPacketNo+= WINDOW_SIZE)
 	{
 		for (size_t i = 0; i < WINDOW_SIZE; i++)
 		{
@@ -653,12 +512,12 @@ void Session::Execute() // send thread function
 		LastFrameSent = LastAckRecv + WINDOW_SIZE;
 
 		/* Send current buffer with sliding window */
-		bool Done = false;
-		while (!Done)
+		bool Sent = false;
+		while (!Sent)
 		{
-
 			/* Check window ack mask, shift window if possible */
-			if (AckMask[0]) {
+			if (AckMask[0]) 
+			{
 				int shift = 1;
 				for (int i = 1; i < WINDOW_SIZE; i++)
 				{
@@ -671,7 +530,8 @@ void Session::Execute() // send thread function
 					AckMask[i] = AckMask[i + shift];
 					SentTime[i] = SentTime[i + shift];
 				}
-				for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++) {
+				for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++) 
+				{
 					SentMask[i] = false;
 					AckMask[i] = false;
 				}
@@ -684,13 +544,13 @@ void Session::Execute() // send thread function
 			{
 				CurrentSequenceNo = LastAckRecv + i + 1;
 
-				if (CurrentSequenceNo < packets.size())
+				if (CurrentSequenceNo < PacketsToSend.size())
 				{
 					if (!SentMask[i] || (!AckMask[i] && (ELAPSED_TIME(std::chrono::high_resolution_clock::now(), SentTime[i]) > TIME_OUT)))
 					{
-						Segment seggs(SourcePort, DestPort, packets[i]);
+						Segment seggs(SourcePort, DestPort, PacketsToSend[CurrentSequenceNo]);
 
-						sendto(ClientUDPSocket, seggs.GetNetworkBuffer().c_str(), seggs.Length, 0, (struct sockaddr*)(&ClientSockAddess), sizeof(ClientSockAddess));
+						sendto(ServerUDPSocket, seggs.GetNetworkBuffer().c_str(), seggs.Length, 0, (struct sockaddr*)(&ClientSockAddess), sizeof(ClientSockAddess));
 						SentMask[i] = true;
 						SentTime[i] = std::chrono::high_resolution_clock::now();
 					}
@@ -699,15 +559,10 @@ void Session::Execute() // send thread function
 
 			/* Move to next buffer if all frames in current buffer has been acked */
 			if (LastAckRecv >= CurrentSequenceNo - 1)
-				Done = true;
-		}
-
-		currentPacketNo += 1;
-		if (Done)
-		{
-			break;
+				Sent = true;
 		}
 	}
+	ReceiverThread.detach();
 }
 
 void Session::ListenForAck()
@@ -716,20 +571,28 @@ void Session::ListenForAck()
 	{
 		char input[BUFFER_SIZE]; //set char buffer as char = uint8_t
 		int clientSize = sizeof(ClientSockAddess);
-		recvfrom(ClientUDPSocket, input, BUFFER_SIZE,
+		const int bytesRecieved = recvfrom(ServerUDPSocket, input, BUFFER_SIZE,
 			MSG_WAITALL, (struct sockaddr*)&ClientSockAddess,
 			&clientSize);
-		ack_error = read_ack(&ack_seq_num, &ack_neg, ack);
-		
-		if (!ack_error && ack_seq_num > lar && ack_seq_num <= lfs) {
-			if (!ack_neg) {
-				window_ack_mask[ack_seq_num - (lar + 1)] = true;
-			}
-			else {
-				window_sent_time[ack_seq_num - (lar + 1)] = TMIN;
+		bool isChecksumBroken = false;
+		bool isAcked = false; // determines if this packet is ACK or NAK
+		ULONG sequenceNo = 0;
+
+		std::lock_guard<std::mutex> lock(SessionMutex);
+		if (IfAckReturnSequence(std::string(input, bytesRecieved), isChecksumBroken, isAcked, sequenceNo))
+		{
+			if (sequenceNo > static_cast<ULONG>(LastAckRecv) && sequenceNo <= static_cast<ULONG>(LastFrameSent) && !isChecksumBroken)
+			{
+				if (isAcked)
+				{
+					AckMask[sequenceNo - (LastAckRecv + 1)] = true; // acknowledged means that this bit will be flipped to true
+
+				}
+				else 
+				{
+					SentTime[sequenceNo - (LastAckRecv + 1)] = std::chrono::high_resolution_clock::now(); // else we will send another packet
+				}
 			}
 		}
-
-		window_info_mutex.unlock();
 	}
 }

@@ -1,3 +1,4 @@
+#pragma once
 
 #include <vector>
 #include <string>
@@ -8,18 +9,20 @@ enum class FLGID
 {
     FILE = (unsigned char)0x00,
     ACK = (unsigned char)0x01,
+    NAK = (unsigned char)0x02,
 };
 
 struct Packet
 {
     Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart); // Data Packet
     Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const std::string& packetData); // Data Packet
-    Packet(const ULONG sessionID, const ULONG sequenceNo); // Ack Packet
+    Packet(const bool isAcked, const ULONG sessionID, const ULONG sequenceNo); // Ack Packet
 
     size_t GetFullLength() const; // in bytes!
     std::string GetBuffer() const; // in bytes!
     std::string GetNetworkBuffer() const; // we return the whole packet in an already nicely network ordered buffer in bytes
     bool isACK() const;
+    bool isNAK() const;
 
     static Packet DecodePacket(const std::string& packetString);
     static Packet DecodePacketNetwork(const std::string& networkPacketString);
@@ -53,6 +56,7 @@ struct Segment
 
 // Decode Utility Functions
 Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken);
+bool IfAckReturnSequence(const std::string& networkSegmentString, bool& isChecksumBroken, bool& isAcked, ULONG& sequenceNo); // Server sided function that checks if ack/nak and then returns sequence number;
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path);
 std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath); // 
                                                                           // returns segments ids that are missing if unpack is unsuccessful

@@ -135,5 +135,21 @@ namespace Utils
 		dialog->Release();
 		return value;
 	}
+	ULONG GenerateUniqueULongKey(const std::vector<ULONG> keyvec)
+	{
+			std::random_device rd;
+			std::mt19937_64 engine(rd()); // Use a Mersenne Twister engine for 64-bit values
+			std::uniform_int_distribution<ULONG> dist(
+				std::numeric_limits<ULONG>::min(),
+				std::numeric_limits<ULONG>::max());
+
+			ULONG newKey;
+			do 
+			{
+				newKey = dist(engine);
+			} while (std::find(keyvec.begin(), keyvec.end(), newKey) != keyvec.end()); // Continue until a unique key is found
+
+			return newKey;
+	}
 }
 
