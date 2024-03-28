@@ -442,18 +442,19 @@ bool execute(SOCKET clientSocket)
 		{
 			std::string listOfFiles{ RSP_LISTFILES };
 
-			size_t NumOfFiles{}, lengthOFFileList{};
+			u_short NumOfFiles{};
+			u_long lengthOfFileList{};
 			std::vector<std::string>FileNames{};
 			for (auto const& file : std::filesystem::directory_iterator{ downLoadRepo })
 			{
 				++NumOfFiles;
 				std::string fileName = file.path().filename().string();
 				FileNames.emplace_back(fileName);
-				lengthOFFileList += fileName.size() + 4; // calculate the length of file list
+				lengthOfFileList += static_cast<u_long>(fileName.size()) + 4; // calculate the length of file list
 			}
 
-			listOfFiles += Utils::htonlToString(htons(static_cast<uint16_t>(NumOfFiles)));
-			listOfFiles += Utils::htonlToString(htonl(static_cast<uint16_t>(lengthOFFileList)));
+			listOfFiles += Utils::htonsToString(NumOfFiles);
+			listOfFiles += Utils::htonlToString(lengthOfFileList);
 
 			for (std::string const& i : FileNames)
 			{

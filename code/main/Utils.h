@@ -26,6 +26,7 @@
 namespace Utils
 {
 	std::string htonlToString(u_long input);
+	std::string htonsToString(u_short input);
 	u_long StringTo_ntohl(std::string const& input);
 	u_short StringTo_ntohs(std::string const& input);
 	u_long StringTo_htonl(std::string const& input);

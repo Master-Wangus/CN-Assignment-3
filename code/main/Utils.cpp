@@ -17,8 +17,17 @@ namespace Utils
 	*************************************************************************/
 	std::string htonlToString(u_long input)
 	{
+		u_long temp = htonl(input);
 		std::string output(sizeof(unsigned long), '\0'); // Initialize string with the size of u_long, filled with '\0'
-		std::memcpy(&output[0], &input, sizeof(unsigned long)); // Copy the binary data of val into the string
+		std::memcpy(&output[0], &temp, sizeof(unsigned long)); // Copy the binary data of val into the string
+		return output;
+	}
+
+	std::string htonsToString(u_short input) 
+	{
+		u_short temp = htons(input);
+		std::string output(sizeof(u_short), '\0'); // Initialize string with the size of u_long, filled with '\0'
+		std::memcpy(&output[0], &temp, sizeof(short)); // Copy the binary data of val into the string
 		return output;
 	}
 	/*!***********************************************************************
