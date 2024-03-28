@@ -106,9 +106,10 @@ struct Session
 
 	Session() = default;
 	Session(sockaddr_in client, ULONG sessionID, std::filesystem::path filePath, ULONG fileLength, USHORT sourcePort, USHORT destPort)
-		: ClientSockAddess(client), SessionID(sessionID), FilePath(filePath), FileLength(fileLength), SourcePort(sourcePort), DestPort(destPort), PacketsToSend(PackFromFile(SessionID, FilePath))
+		: ClientSockAddess(client), SessionID(sessionID), FilePath(filePath), FileLength(fileLength), SourcePort(sourcePort), DestPort(destPort)
 
 	{
+		PacketsToSend = PackFromFile(SessionID, FilePath);
 		ServerUDPSocket = socket(
 			AF_INET, // IPv4
 			SOCK_DGRAM, // Best effort
@@ -116,6 +117,7 @@ struct Session
 
 		if (ServerUDPSocket == INVALID_SOCKET)
 		{
+			std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
 			std::cerr << "udpSocket creation failed." << std::endl;
 			WSACleanup();
 		}
@@ -126,6 +128,7 @@ struct Session
 			sizeof(ClientSockAddess));
 		if (errorCode != NO_ERROR)
 		{
+			std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
 			std::cerr << "udBind() failed." << std::endl;
 			closesocket(ServerUDPSocket);
 			WSACleanup();
@@ -334,6 +337,7 @@ bool execute(SOCKET clientSocket)
 
 	if (fs.is_open())
 	{
+		std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
 		std::cout << "Loading Server paramters from config file" << std::endl;
 	}
 
@@ -343,6 +347,7 @@ bool execute(SOCKET clientSocket)
 
 	while (downLoadRepo.empty() || !std::filesystem::exists(downLoadRepo))
 	{
+		std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
 		std::cout << "Enter a valid download repository: ";
 		std::getline(std::cin, downLoadRepo);
 	}
@@ -353,10 +358,10 @@ bool execute(SOCKET clientSocket)
 	constexpr size_t TCPBUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
 	char inputTCP[TCPBUFFER_SIZE]; //set char buffer as char = uint8_t
 	bool isDownloading = false;
+	Session* CurrentThreadSession = nullptr;
 
 	while (true) //loop until client disconnects
 	{
-		Session* CurrentThreadSession = nullptr;
 		/// UDP DOWNLOAD
 		if (isDownloading && CurrentThreadSession != nullptr)
 		{
@@ -510,56 +515,62 @@ void Session::Execute() // send thread function
 	}
 	// Wesley: to be pushed to taskqueue if possible
 	// create a thread to handle all receiving acks until download is done
-	std::thread ReceiverThread(&Session::ListenForAck, this);
+	 std::thread ReceiverThread(&Session::ListenForAck, this);
 
 	// we will get packets in waves of WINDOW_SIZE
 	for (int currentPacketNo{}; currentPacketNo < PacketsToSend.size(); currentPacketNo+= WINDOW_SIZE)
 	{
-		// these arrays are alr set sized to WINDOW_SIZE
-		for (size_t i = 0; i < WINDOW_SIZE; i++)
 		{
-			// We set them to false to prep
-			AckMask[i] = false;
-			SentMask[i] = false;
+			std::lock_guard<std::mutex> lock(SessionMutex);
+			// these arrays are alr set sized to WINDOW_SIZE
+			for (size_t i = 0; i < WINDOW_SIZE; i++)
+			{
+				// We set them to false to prep
+				AckMask[i] = false;
+				SentMask[i] = false;
+			}
+			// LAR guarantees all packets are successfully received up to this point
+			LastAckRecv = -1;
+			// LFS is the last packet sent
+			LastFrameSent = LastAckRecv + WINDOW_SIZE;
 		}
-		// LAR guarantees all packets are successfully received up to this point
-		LastAckRecv = -1;
-		// LFS is the last packet sent
-		LastFrameSent = LastAckRecv + WINDOW_SIZE;
 
 		bool Sent = false; // sending the whole window
 		while (!Sent)
 		{
-			// if acknowledged first packet in window, shift
-			if (AckMask[0]) 
 			{
-				// we shift to the right once
-				int shift = 1;
-				for (int i = 1; i < WINDOW_SIZE; i++)
+				std::lock_guard<std::mutex> lock(SessionMutex);
+				// if acknowledged first packet in window, shift
+				if (AckMask[0])
 				{
-					// we shift some more if ack
-					if (!AckMask[i]) break;
-					++shift;
-				}
+					// we shift to the right once
+					int shift = 1;
+					for (int i = 1; i < WINDOW_SIZE; i++)
+					{
+						// we shift some more if ack
+						if (!AckMask[i]) break;
+						++shift;
+					}
 
-				// we set the previous ack slots to the non ack packats
-				for (int i = 0; i < WINDOW_SIZE - shift; i++)
-				{
-					SentMask[i] = SentMask[i + shift];
-					AckMask[i] = AckMask[i + shift];
-					SentTime[i] = SentTime[i + shift];
-				}
+					// we set the previous ack slots to the non ack packats
+					for (int i = 0; i < WINDOW_SIZE - shift; i++)
+					{
+						SentMask[i] = SentMask[i + shift];
+						AckMask[i] = AckMask[i + shift];
+						SentTime[i] = SentTime[i + shift];
+					}
 
-				// then we set the new packets after to be ready for sending
-				for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++) 
-				{
-					SentMask[i] = false;
-					AckMask[i] = false;
+					// then we set the new packets after to be ready for sending
+					for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++)
+					{
+						SentMask[i] = false;
+						AckMask[i] = false;
+					}
+					// we guaranteed ack, so we shift LAR
+					LastAckRecv += shift;
+					// we have sent the packets in the window so we set LFS to the end of the window
+					LastFrameSent = LastAckRecv + WINDOW_SIZE;
 				}
-				// we guaranteed ack, so we shift LAR
-				LastAckRecv += shift;
-				// we have sent the packets in the window so we set LFS to the end of the window
-				LastFrameSent = LastAckRecv + WINDOW_SIZE;
 			}
 
 			// now we handle packet sending
@@ -576,6 +587,7 @@ void Session::Execute() // send thread function
 					// or... look at ListenForAck
 					if (!SentMask[i] || (!AckMask[i] && (ELAPSED_TIME(std::chrono::high_resolution_clock::now(), SentTime[i]) > TIME_OUT)))
 					{
+						std::lock_guard<std::mutex> lock(SessionMutex);
 						Segment seggs(SourcePort, DestPort, PacketsToSend[CurrentSequenceNo]);
 
 						sendto(ServerUDPSocket, seggs.GetNetworkBuffer().c_str(), seggs.Length, 0, (struct sockaddr*)(&ClientSockAddess), sizeof(ClientSockAddess));
@@ -586,13 +598,12 @@ void Session::Execute() // send thread function
 				else
 					break; // we have hit the end of the packets
 			}
-
 			/* Move to next buffer if all frames in current buffer has been acked */
 			if (LastAckRecv >= CurrentSequenceNo - 1)
 				Sent = true;
 		}
 	}
-	ReceiverThread.detach();
+	 ReceiverThread.detach();
 }
 
 void Session::ListenForAck()
