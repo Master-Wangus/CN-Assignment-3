@@ -110,29 +110,6 @@ struct Session
 
 	{
 		PacketsToSend = PackFromFile(SessionID, FilePath);
-		ServerUDPSocket = socket(
-			AF_INET, // IPv4
-			SOCK_DGRAM, // Best effort
-			IPPROTO_UDP); // Could be 0 for autodetect, but best effort over IPv4 is always UDP.
-
-		if (ServerUDPSocket == INVALID_SOCKET)
-		{
-			std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
-			std::cerr << "udpSocket creation failed." << std::endl;
-			WSACleanup();
-		}
-
-		int errorCode = bind(
-			ServerUDPSocket,
-			(const struct sockaddr*)&ClientSockAddess,
-			sizeof(ClientSockAddess));
-		if (errorCode != NO_ERROR)
-		{
-			std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
-			std::cerr << "udBind() failed." << std::endl;
-			closesocket(ServerUDPSocket);
-			WSACleanup();
-		}
 	}
 
 	~Session()
