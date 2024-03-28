@@ -360,7 +360,10 @@ bool execute(SOCKET clientSocket)
 		/// UDP DOWNLOAD
 		if (isDownloading && CurrentThreadSession != nullptr)
 		{
+			// we call the sesson download function 
 			CurrentThreadSession->Execute();
+
+			// return memory and set to false
 			delete CurrentThreadSession;
 			isDownloading = false;
 		}
@@ -421,6 +424,10 @@ bool execute(SOCKET clientSocket)
 				getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
 				std::lock_guard<std::mutex> lock(SessionMutex);
 				ULONG newSessionID = Utils::GenerateUniqueULongKey(SessionsInProgress);
+
+				// we allocate memory for a new session
+				// sessions are thread bound and will never be accessed from another thread so we will keep all responsibility 
+				// to the thread running the session
 				CurrentThreadSession = new Session(clientAddr, newSessionID, filePath, static_cast<ULONG>(std::filesystem::file_size(filePath)), (USHORT)UDPPortNumber, ClientUDPportNum);
 				isDownloading = true;
 			}
@@ -500,52 +507,72 @@ void Session::Execute() // send thread function
 	{
 		return;
 	}
+	// Wesley: to be pushed to taskqueue if possible
+	// create a thread to handle all receiving acks until download is done
 	std::thread ReceiverThread(&Session::ListenForAck, this);
+
+	// we will get packets in waves of WINDOW_SIZE
 	for (int currentPacketNo{}; currentPacketNo < PacketsToSend.size(); currentPacketNo+= WINDOW_SIZE)
 	{
+		// these arrays are alr set sized to WINDOW_SIZE
 		for (size_t i = 0; i < WINDOW_SIZE; i++)
 		{
+			// We set them to false to prep
 			AckMask[i] = false;
 			SentMask[i] = false;
 		}
+		// LAR guarantees all packets are successfully received up to this point
 		LastAckRecv = -1;
+		// LFS is the last packet sent
 		LastFrameSent = LastAckRecv + WINDOW_SIZE;
 
-		/* Send current buffer with sliding window */
-		bool Sent = false;
+		bool Sent = false; // sending the whole window
 		while (!Sent)
 		{
-			/* Check window ack mask, shift window if possible */
+			// if acknowledged first packet in window, shift
 			if (AckMask[0]) 
 			{
+				// we shift to the right once
 				int shift = 1;
 				for (int i = 1; i < WINDOW_SIZE; i++)
 				{
+					// we shift some more if ack
 					if (!AckMask[i]) break;
-					shift += 1;
+					++shift;
 				}
+
+				// we set the previous ack slots to the non ack packats
 				for (int i = 0; i < WINDOW_SIZE - shift; i++)
 				{
 					SentMask[i] = SentMask[i + shift];
 					AckMask[i] = AckMask[i + shift];
 					SentTime[i] = SentTime[i + shift];
 				}
+
+				// then we set the new packets after to be ready for sending
 				for (int i = WINDOW_SIZE - shift; i < WINDOW_SIZE; i++) 
 				{
 					SentMask[i] = false;
 					AckMask[i] = false;
 				}
+				// we guaranteed ack, so we shift LAR
 				LastAckRecv += shift;
+				// we have sent the packets in the window so we set LFS to the end of the window
 				LastFrameSent = LastAckRecv + WINDOW_SIZE;
 			}
+
+			// now we handle packet sending
 			int CurrentSequenceNo = 0;
-			/* Send frames that has not been sent or has timed out */
 			for (int i = 0; i < WINDOW_SIZE; i++)
 			{
 				CurrentSequenceNo = LastAckRecv + i + 1;
 
 				if (CurrentSequenceNo < PacketsToSend.size())
 				{
+					// we send a packet only when:
+					// condition 1: not sent yet
+					// condition 2: packet has not been acknowledged and time elapsed has been more than timeout
+					// or... look at ListenForAck
 					if (!SentMask[i] || (!AckMask[i] && (ELAPSED_TIME(std::chrono::high_resolution_clock::now(), SentTime[i]) > TIME_OUT)))
 					{
 						Segment seggs(SourcePort, DestPort, PacketsToSend[CurrentSequenceNo]);
@@ -555,6 +582,8 @@ void Session::Execute() // send thread function
 						SentTime[i] = std::chrono::high_resolution_clock::now();
 					}
 				}
+				else
+					break; // we have hit the end of the packets
 			}
 
 			/* Move to next buffer if all frames in current buffer has been acked */
@@ -590,6 +619,7 @@ void Session::ListenForAck()
 				}
 				else 
 				{
+					// condition 3 checksum is wrong on client side so we send another packet (NAK)
 					SentTime[sequenceNo - (LastAckRecv + 1)] = std::chrono::high_resolution_clock::now(); // else we will send another packet
 				}
 			}
