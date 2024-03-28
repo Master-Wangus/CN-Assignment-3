@@ -46,97 +46,6 @@ void disconnect(SOCKET& listenerSocket);
 #include "packet.h"
 
 
-/*!***********************************************************************
-\brief
-Changes the message length in network order to its string representation in hex form through binary manipulation.
-\param[in, out] long
-the long that is the message length to be converted to string
-\return
-The string representing the message length in network order
-*************************************************************************/
-std::string htonlToString(u_long input) {
-	std::string output(sizeof(unsigned long), '\0'); // Initialize string with the size of u_long, filled with '\0'
-	std::memcpy(&output[0], &input, sizeof(unsigned long)); // Copy the binary data of val into the string
-	return output;
-}
-
-
-std::string htonsToString(short input) {
-	std::string output(sizeof(short), '\0'); // Initialize string with the size of u_long, filled with '\0'
-	std::memcpy(&output[0], &input, sizeof(short)); // Copy the binary data of val into the string
-	return output;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a unsigned long
-for ntohl to process.
-\param[in, out] string
-the input string representing the length of the message in network order
-\return
-the long representing the system order
-*************************************************************************/
-u_long StringTontohl(std::string const& input) {
-	u_long ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
-	return ret;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a short
-for ntohs to process.
-\param[in, out] string
-the input string representing the length of the message in network order
-\return
-the long representing the system order
-*************************************************************************/
-uint16_t StringTontohs(std::string const& input) {
-	uint16_t ret = 0;
-	std::memcpy(&ret, input.data(), sizeof(uint16_t)); // copy binary data into the string
-	return ret;
-}
-
-/*!***********************************************************************
-\brief
-To convert the string taken as input which maybe network order and convert it to a unsigned long
-for ntohl to process.
-\param[in] std::vector<std::pair<sockaddr_in, SOCKET>>const& vec
-Vector of sockets
-\param[in] std::pair<long, uint16_t> addr
-IP and port to search for
-\return
-The socket found else -1
-*************************************************************************/
-SOCKET SearchConnectedSockets(std::vector<std::pair<sockaddr_in, SOCKET>>const& vec, std::pair<long, uint16_t> addr) {
-	for (std::pair<sockaddr_in, SOCKET> const& i : vec) {
-		if (i.first.sin_addr.S_un.S_addr == addr.first && ntohs(i.first.sin_port) == addr.second) {
-			return i.second;
-		}
-	}
-	return -1;
-}
-
-/*!***********************************************************************
-\brief
-Converts a hex string into human readable string
-\param[in, out] inputstring
-the hex string to be converted
-\return
-the human readable string
-*************************************************************************/
-std::string HexToString(const std::string& inputstring) {
-	std::string output{};
-	for (size_t i = 0; i < inputstring.length(); i += 2) {
-		std::string byteString = inputstring.substr(i, 2);
-		//convert to unsigned long in hex format then cast to char
-		char byte = static_cast<char>(std::stoul(byteString, nullptr, 16));
-		output.push_back(byte); //append to message
-	}
-	return output;
-}
-
-
 enum CMDID {
 	UNKNOWN = (unsigned char)0x0,//not used
 	REQ_QUIT = (unsigned char)0x1,
@@ -152,6 +61,7 @@ std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
 uint16_t UDPPortNumber{}, TCPPortNumber{};
 SOCKET listenerSocket{};
 SOCKET udpSocket{};
+static u_long g_SessionID{};
 
 int main()
 {
@@ -423,10 +333,10 @@ bool execute(SOCKET clientSocket)
 	bool isDownloading = false;
 
 	std::vector<Packet> filePackets;
-
+	size_t index{};
+	size_t windowSize{};
 	while (true) //loop until client disconnects
 	{
-
 		/// UDP DOWNLOAD
 		if (isDownloading)
 		{
@@ -452,48 +362,40 @@ bool execute(SOCKET clientSocket)
 				break;
 			}
 			inputUDP[bytesRecieved] = '\0';
-			std::cout << inputUDP << '\n';
 			std::string text(inputUDP, bytesRecieved);
-			Packet packet = Packet::DecodePacketNetwork(text);
-
+			Packet packet = Packet::DecodePacket_ntohl(text);
 			if (packet.isACK()) // Client has recieved the packet
 			{
-				// 1. store the ack no. in a vector or smth
-				// 2. check if packet is out of order
-				// 3. 
+				std::cout << packet.SequenceNo << '\n';
 			}
 
-			for (size_t i{}; i < filePackets.size(); ++i)
+			// Replace filePackets to window size
+			if (index < filePackets.size())
 			{
-				// Send to Client
-				std::string packet = filePackets[i].GetNetworkBuffer();
-				const int bytesSent = sendto(udpSocket, packet.c_str(), static_cast<int>(packet.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+				std::string filePacket = filePackets[index].GetBuffer_htonl();
+				const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 				if (bytesSent == SOCKET_ERROR)
 				{
 					std::cout << WSAGetLastError();
 					std::cerr << " send() failed." << std::endl;
 					break;
 				}
+				index++;
 			}
-
-			std::string endPacket = Packet::GetEndPacket();
-			// Send to Server
-			const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
-			if (bytesSent == SOCKET_ERROR)
+			else
 			{
-				std::cerr << "send() failed." << std::endl;
-				break;
+				// Tell the client that the download is complete
+				std::string endPacket = Packet::GetEndPacket();
+				const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+				if (bytesSent == SOCKET_ERROR)
+				{
+					std::cerr << "send() failed." << std::endl;
+					break;
+				}
+
+				isDownloading = false;
+				filePackets.clear(); // Reset the download Packets
 			}
-
-			///// End of file download, might need to track in other ways
-			//if (packet.SequenceNo == filePackets.size() - 1)
-			//{
-			//	isDownloading = false;
-			//	filePackets.clear(); // Reset the download Packets
-			//}
-
-			isDownloading = false;
-			filePackets.clear(); // Reset the download Packets
 		}
 
 		/// TCP reciever
@@ -542,19 +444,13 @@ bool execute(SOCKET clientSocket)
 				output.append(reinterpret_cast<char*>(&serverAddr.sin_addr.S_un.S_addr), sizeof(serverAddr.sin_addr.S_un.S_addr));
 				u_short clientPort = htons(UDPPortNumber);
 				output.append(reinterpret_cast<char*>(&clientPort), sizeof(clientPort));
-				ULONG sessionID{}; /// WESLEY TO INCORPORATE SESSION ID
-
-				//output += htonl(sessionID);
 
 				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
 				output += fileLength;
-				filePackets =  PackFromFile(sessionID, filePath);
-				//// Setting up of client address
-				//SecureZeroMemory(&clientAddr, sizeof(clientAddr));
-				//clientAddr.sin_family = AF_INET;
-				//memcpy(&clientAddr.sin_addr.S_un.S_addr, &clientIP, 4);
-				//clientAddr.sin_port = htons(ClientUDPportNum);
 
+				// Store the packets & update sessionID
+				filePackets =  PackFromFile(g_SessionID, filePath);
+				++g_SessionID;
 				isDownloading = true;
 			}
 			else // file does not exist

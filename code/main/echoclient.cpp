@@ -35,6 +35,7 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include <sstream>
 #include <iomanip>
 #include <thread>
+#include <queue>
 
 #include "Utils.h"			// helper file
 #include "packet.h"
@@ -384,13 +385,13 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				inet_ntop(AF_INET, &sin.sin_addr, clientIP, INET_ADDRSTRLEN); //getting IP address of client with IPV4
 
 				std::cout << std::endl;
+				std::cout << "==========RECV START==========" << std::endl;
 				std::cout << "Now listening for messages on: " << clientIP<< ':' << ntohs(sin.sin_port) << '\n';
 
 				/// UDP SESSION START ACK
-				std::cout << "Start UDP session\n";
+				std::cout << "Start UDP session...\n";
 				// send the acknowledgement to server to start the udp session 
-				std::string UDPstart = "Start UDP"; // temp
-				const int bytesSent = sendto(UDPsocket, UDPstart.c_str(), static_cast<int>(UDPstart.size()), 0, (sockaddr*)&serverAddress, sizeof(serverAddress));
+				const int bytesSent = sendto(UDPsocket, Packet::GetStartPacket().c_str(), static_cast<int>(Packet::GetStartPacket().size()), 0, (sockaddr*)&serverAddress, sizeof(serverAddress));
 				if (bytesSent == SOCKET_ERROR)
 				{
 					int error = WSAGetLastError();
@@ -399,16 +400,20 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				}
 				std::filesystem::path filePath(g_downloadPath + "\\" + g_fileName);
 				std::vector<Packet> recievedPackets;
+				constexpr size_t BUFFER_SIZE_UDP = PACKET_SIZE + 18;
+				u_long sequenceNo{};
+				auto cmp = [](Packet lhs, Packet rhs) { return lhs.SequenceNo > rhs.SequenceNo; };
+				std::priority_queue < Packet, std::vector<Packet>, decltype(cmp)> packetBuffer(cmp);
 				/// UDP SESSSION START
 				while (true)
 				{
-					char buffer_UDP[PACKET_SIZE]{};
+					char buffer_UDP[BUFFER_SIZE_UDP]{};
 
 					int size = sizeof(serverAddress);
-					int bytesRecieved_UDP = recvfrom(UDPsocket, buffer_UDP, PACKET_SIZE - 1, 0, (sockaddr*)&serverAddress, &size);
+					int bytesRecieved_UDP = recvfrom(UDPsocket, buffer_UDP, BUFFER_SIZE_UDP - 1, 0, (sockaddr*)&serverAddress, &size);
 					if (bytesRecieved_UDP == SOCKET_ERROR)
 					{
-						size_t errorCode = WSAGetLastError();
+						std::cout << WSAGetLastError();
 						std::cout << "recvfrom() failed.\n";
 						break;
 					}
@@ -421,19 +426,44 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					{
 						buffer_UDP[bytesRecieved_UDP] = '\0';
 						text = std::string(buffer_UDP, bytesRecieved_UDP);
-
+						
 						if (text[0] == static_cast<u_char>(FLGID::FIN))
 						{
 							std::cout << "End packet recieved\n";
 							break;
 						}
-						recievedPackets.emplace_back(text); // Add the packets 
+						else if (text[0] == static_cast<u_char>(FLGID::FILE))
+						{
+							packetBuffer.push(Packet::DecodePacket_ntohl(text));
+
+							// if the sequenceNo is correct
+							while (!packetBuffer.empty() && packetBuffer.top().SequenceNo == sequenceNo)
+							{
+								// Create ACK & Append
+								AppendPacketToFile(packetBuffer.top(), filePath);
+								Packet ack(packetBuffer.top().SessionID, sequenceNo);
+								packetBuffer.pop();
+
+
+								std::string ackString = ack.GetBuffer_htonl();
+								const int bytesSent = sendto(UDPsocket, ackString.c_str(), static_cast<int>(ackString.size()), 0, (sockaddr*)&serverAddress, size);
+								if (bytesSent == SOCKET_ERROR)
+								{
+									std::cout << WSAGetLastError();
+									std::cerr << " send() failed." << std::endl;
+									break;
+								}
+								
+								++sequenceNo;
+							}
+						}
+						//recievedPackets.push_back(); // Add the packets 
 					}
 				}
-
-				UnpackToFile(recievedPackets, filePath);
+				//UnpackToFile(recievedPackets, filePath);
 				std::cout << "Download complete\n";
-				
+				std::cout << "==========RECV END==========" << std::endl;
+				continue;
 			}
 			else if (text[0] == RSP_LISTFILES) 
 			{
