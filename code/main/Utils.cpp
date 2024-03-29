@@ -30,6 +30,21 @@ namespace Utils
 		std::memcpy(&output[0], &temp, sizeof(short)); // Copy the binary data of val into the string
 		return output;
 	}
+
+	u_long StringTo_uLong(std::string const& input)
+	{
+		u_long ret = 0;
+		std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
+		return ret;
+	}
+
+
+	u_short StringTo_uShort(std::string const& input) 
+	{
+		u_short ret = 0;
+		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
+		return ret;
+	}
 	/*!***********************************************************************
 	\brief
 	To convert the string taken as input which maybe network order and convert it to a unsigned long

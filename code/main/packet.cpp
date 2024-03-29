@@ -271,26 +271,18 @@ void AppendPacketToFile(const Packet& packet, const std::filesystem::path filePa
 		std::cerr << "An error occurred while writing to the file: " << filePath << std::endl;
 	}
 	else {
-		std::cout << "File successfully reconstructed from packets." << std::endl;
+		std::cout << "File successfully reconstructed from packet: " << packet.SequenceNo << std::endl;
 	}
 }
 
 std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath)
 {
 	std::vector<ULONG> segmentIDs;
-	std::ofstream outputFile(filePath, std::ios::binary | std::ios::out);
+	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
 
 	for (ULONG segmentID{}; segmentID < packetVector.size(); ++segmentID)
 	{
-		if ((segmentID) != packetVector[segmentID].SequenceNo)
-		{
-			segmentIDs.push_back(segmentID);
-		}
-		else
-		{
-			outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
-		}
-
+		outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
 	}
 	outputFile.close();
 

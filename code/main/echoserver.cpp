@@ -42,6 +42,8 @@ void disconnect(SOCKET& listenerSocket);
 #include <iostream>			// cout, cerr
 #include <string>			// string
 #include <vector>
+#include <queue>
+#include <unordered_map>
 #include "Utils.h"
 #include "packet.h"
 
@@ -59,9 +61,10 @@ enum CMDID {
 
 std::vector<std::pair<sockaddr_in, SOCKET>> connectedSockets{};
 uint16_t UDPPortNumber{}, TCPPortNumber{};
-SOCKET listenerSocket{};
-SOCKET udpSocket{};
+SOCKET listenerSocket{}, udpSocket{};
+std::string g_DownloadRepo{};
 static u_long g_SessionID{};
+std::unordered_map<u_long, std::priority_queue<u_long, std::vector<u_long>, std::greater<u_long>>> g_Packets;
 
 int main()
 {
@@ -104,7 +107,24 @@ int main()
 	}
 	std::string UDPportString{ std::to_string(UDPPortNumber) };
 
-	
+	std::ifstream fs("Config.txt", std::ios::binary); // open the config file
+
+	if (fs.is_open())
+	{
+		std::cout << "Loading Server paramters from config file" << std::endl;
+	}
+
+	//std::string parse{};
+	//std::getline(fs, parse);
+	////downLoadRepo = parse.substr(parse.find_first_of(" ") + 1);
+	//g_DownloadRepo = parse;
+
+	while (!std::filesystem::exists(g_DownloadRepo))
+	{
+		std::getline(std::cin, g_DownloadRepo);
+		if (std::filesystem::exists(g_DownloadRepo)) break;
+		std::cout << "Enter a valid download repository: ";
+	}
 
 
 	// -------------------------------------------------------------------------
@@ -225,6 +245,7 @@ int main()
 	std::cout << "\nServer IP Address: " << hostName << std::endl;
 	std::cout << "Server TCP Port Number: " << TCPportString << std::endl;
 	std::cout << "Server UDP Port Number: " << UDPportString << std::endl;
+	std::cout << "Download Repository: " << g_DownloadRepo << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Set a socket in a listening mode and accept 1 incoming client.
@@ -301,24 +322,6 @@ int main()
 bool execute(SOCKET clientSocket)
 {
 	bool stay = true;
-	std::string downLoadRepo{};
-	std::ifstream fs("Config.txt", std::ios::binary); // open the config file
-
-	if (fs.is_open())
-	{
-		std::cout << "Loading Server paramters from config file" << std::endl;
-	}
-
-	std::string parse{};
-	std::getline(fs, parse);
-	//downLoadRepo = parse.substr(parse.find_first_of(" ") + 1);
-	downLoadRepo = parse;
-
-	while (downLoadRepo.empty() || !std::filesystem::exists(downLoadRepo))
-	{
-		std::cout << "Enter a valid download repository: ";
-		std::getline(std::cin, downLoadRepo);
-	}
 	
 	// Enable non-blocking I/O on a socket.
 	u_long enable = 1;
@@ -327,31 +330,81 @@ bool execute(SOCKET clientSocket)
 	constexpr size_t TCPBUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
 	char inputTCP[TCPBUFFER_SIZE]; //set char buffer as char = uint8_t
 
-	constexpr size_t UDPBUFFER_SIZE = 1000; //arbitrary buffer size. could be 1 could be a million
+	constexpr size_t UDPBUFFER_SIZE = PACKET_SIZE + 18; //arbitrary buffer size. could be 1 could be a million
 	char inputUDP[UDPBUFFER_SIZE]; //set char buffer as char = uint8_t
 
-	bool isDownloading = false;
 
+	// UDP 
+	bool isDownloading = false;
 	std::vector<Packet> filePackets;
 	size_t index{};
-	size_t windowSize{};
+	constexpr size_t windowSize = 5;
+	u_long currSequence{}, threadSessionID{static_cast<u_long>(-1)};
+	std::unordered_map<size_t, std::chrono::high_resolution_clock::time_point> timerBuffer;
+	int packetLossRate = 3;
+	bool packetLoss = true;
+	DWORD timeout = 200; // in milli
+	sockaddr_in clientAddr{}; // Client address UDP
+	int clientAddrSize = sizeof(clientAddr);
+
 	while (true) //loop until client disconnects
 	{
 		/// UDP DOWNLOAD
 		if (isDownloading)
 		{
-			sockaddr clientAddr{}; // Client address
-			SecureZeroMemory(&clientAddr, sizeof(clientAddr));
-			int clientAddrSize = sizeof(clientAddr);
+			int errorCode = setsockopt(udpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+			if (errorCode != NO_ERROR)
+			{
+				std::cerr << "setsockopt() failed." << std::endl;
+				break;
+			}
 
+			sockaddr_in randomAddr{}; // Client address UDP
+			int randomAddrSize = sizeof(randomAddr);
 			const int bytesRecieved = recvfrom(udpSocket,
 				inputUDP,
 				UDPBUFFER_SIZE - 1,
 				0,
-				&clientAddr,
-				&clientAddrSize);
+				(sockaddr*)&randomAddr,
+				&randomAddrSize);
 			if (bytesRecieved == SOCKET_ERROR)
 			{
+				// no response from client
+				if (WSAGetLastError() == WSAETIMEDOUT)
+				{
+					if (currSequence < filePackets.size())
+					{
+						std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
+						/// RETRANSMISSION
+						std::cout << "Retransmitting Packet " << currSequence <<  " SessionID: " << threadSessionID << '\n';
+						const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+						if (bytesSent == SOCKET_ERROR)
+						{
+							std::cout << WSAGetLastError();
+							std::cerr << " send() failed." << std::endl;
+							break;
+						}
+					}
+					else
+					{
+						// Tell the client that the download is complete
+						std::string endPacket = Packet::GetEndPacket();
+						const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+						if (bytesSent == SOCKET_ERROR)
+						{
+							std::cerr << "send() failed." << std::endl;
+							break;
+						}
+
+						isDownloading = false;
+						index = 0;
+						currSequence = 0;
+						timeout = 0;
+						filePackets.clear(); // Reset the download Packets
+						std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
+					}
+					continue;
+				}
 				std::cout << WSAGetLastError();
 				std::cerr << " recvfrom() failed." << std::endl;
 				break;
@@ -366,12 +419,46 @@ bool execute(SOCKET clientSocket)
 			Packet packet = Packet::DecodePacket_ntohl(text);
 			if (packet.isACK()) // Client has recieved the packet
 			{
-				std::cout << packet.SequenceNo << '\n';
+				// buffer to check acknolwdgement
+				timerBuffer.erase(packet.SequenceNo);
+				g_Packets[packet.SessionID].push(packet.SequenceNo);
+				std::cout << "Recieved ACK: " << packet.SequenceNo << " | SessionID: " << packet.SessionID << '\n';
 			}
-
-			// Replace filePackets to window size
-			if (index < filePackets.size())
+			// Check if there is any pending acknowldgement
+			if (!g_Packets[threadSessionID].empty() && currSequence == g_Packets[threadSessionID].top())
 			{
+				g_Packets[threadSessionID].pop();
+				++currSequence;
+			}
+			else if (!g_Packets[threadSessionID].empty() && currSequence != g_Packets[threadSessionID].top()) // potential packet loss occured
+			{
+				// check for packet loss
+				if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - timerBuffer[currSequence]).count() >= timeout)
+				{
+					std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
+					/// RETRANSMISSION
+					std::cout << "Retransmitting Packet " << currSequence << " SessionID: " << threadSessionID << '\n';
+
+					const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
+					if (bytesSent == SOCKET_ERROR)
+					{
+						std::cout << WSAGetLastError();
+						std::cerr << " send() failed." << std::endl;
+						break;
+					}
+					//timerBuffer[index] = std::chrono::high_resolution_clock::now();
+					continue;
+				}
+			}
+			// Replace filePackets to window size
+			if (index < currSequence + windowSize && index < filePackets.size())
+			{
+				if (packetLoss && packetLossRate && (index % packetLossRate == 0)) // packet loss check
+				{
+					std::cout << "Packet [" << index << "] with SessionID: " << threadSessionID << " lost.\n";
+					index++;
+					continue;
+				}
 				std::string filePacket = filePackets[index].GetBuffer_htonl();
 				const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 				if (bytesSent == SOCKET_ERROR)
@@ -380,9 +467,13 @@ bool execute(SOCKET clientSocket)
 					std::cerr << " send() failed." << std::endl;
 					break;
 				}
+				timerBuffer[index] = std::chrono::high_resolution_clock::now();
 				index++;
 			}
-			else
+			
+
+			/// END DOWNLOAD
+			if (currSequence == filePackets.size()) // recieved all acks
 			{
 				// Tell the client that the download is complete
 				std::string endPacket = Packet::GetEndPacket();
@@ -394,7 +485,11 @@ bool execute(SOCKET clientSocket)
 				}
 
 				isDownloading = false;
+				timeout = 0;
+				index = 0;
+				currSequence = 0;
 				filePackets.clear(); // Reset the download Packets
+				std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 			}
 		}
 
@@ -427,13 +522,16 @@ bool execute(SOCKET clientSocket)
 		}
 		else if (text[0] == REQ_DOWNLOAD) //check 1st byte  == echo
 		{
-			std::string clientIP{ text.substr(1, 4) }; //get the ip of the client requesting UDP file download
-			uint16_t ClientUDPportNum{ Utils::StringTo_ntohs(text.substr(5, 2)) }; //get the client UDP port numba in host order bytes
+			/// Save UDP proporties
+			u_long clientIP = Utils::StringTo_htonl(text.substr(1, 4)); //get the ip of the client requesting UDP file download
+			u_short ClientUDPPortNum = Utils::StringTo_htons(text.substr(5, 2));
+
+			// File properties
 			u_long fileNameLength{ Utils::StringTo_ntohl(text.substr(7, 4)) }; //get the message length in host order bytes
 			std::string filename{ text.substr(11) }; //get the message
 
 			std::string output{};
-			std::filesystem::path filePath = std::filesystem::path(downLoadRepo) / filename;
+			std::filesystem::path filePath = std::filesystem::path(g_DownloadRepo) / filename;
 			if (std::filesystem::exists(filePath)) //file exist, sending client UDP details
 			{
 				output += RSP_DOWNLOAD;
@@ -441,17 +539,38 @@ bool execute(SOCKET clientSocket)
 				int addrSize = sizeof(serverAddr);
 				getsockname(listenerSocket, (struct sockaddr*)&serverAddr, &addrSize);
 				
+				// IP
 				output.append(reinterpret_cast<char*>(&serverAddr.sin_addr.S_un.S_addr), sizeof(serverAddr.sin_addr.S_un.S_addr));
-				u_short clientPort = htons(UDPPortNumber);
-				output.append(reinterpret_cast<char*>(&clientPort), sizeof(clientPort));
-
+				u_short serverPort = htons(UDPPortNumber);
+				// Port Number
+				output.append(reinterpret_cast<char*>(&serverPort), sizeof(serverPort));
+				// Session ID
+				u_long sessionID = htonl(g_SessionID);
+				output.append(reinterpret_cast<char*>(&sessionID), sizeof(sessionID));
+				// FileLength
 				std::string fileLength = std::to_string(std::filesystem::file_size(filePath));
 				output += fileLength;
 
-				// Store the packets & update sessionID
+				// Ready all UDP variables
 				filePackets =  PackFromFile(g_SessionID, filePath);
+				threadSessionID = g_SessionID;
+				timeout = 200;
 				++g_SessionID;
 				isDownloading = true;
+				
+
+				SecureZeroMemory(&clientAddr, sizeof(clientAddr));
+				clientAddr.sin_family = AF_INET;
+				clientAddr.sin_addr.S_un.S_addr = htonl(clientIP);
+				clientAddr.sin_port = htons(ClientUDPPortNum);
+
+				// Print out ip and Session
+				char clientIp_Print[INET_ADDRSTRLEN]; //set buffer to be a macro that decides the length based on the connection type eg ipv4, ipv6 etc etc
+				inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp_Print, INET_ADDRSTRLEN); //set buffer to be a macro that decides the length based on the connection type eg ipv4, ipv6 etc etc
+				std::cout << "==========DOWNLOAD START==========" << std::endl;
+				std::cout << clientIp_Print << ':' << ntohs(clientAddr.sin_port) << "	SessionID: " << threadSessionID << std::endl;
+				std::cout << std::endl;
+
 			}
 			else // file does not exist
 			{
@@ -467,7 +586,7 @@ bool execute(SOCKET clientSocket)
 			u_short NumOfFiles{};
 			u_long lengthOfFileList{};
 			std::vector<std::string>FileNames{};
-			for (auto const& file : std::filesystem::directory_iterator{ downLoadRepo })
+			for (auto const& file : std::filesystem::directory_iterator{ g_DownloadRepo })
 			{
 				++NumOfFiles;
 				std::string fileName = file.path().filename().string();
@@ -494,15 +613,15 @@ bool execute(SOCKET clientSocket)
 		}
 	}
 
-	sockaddr_in clientAddr{};
-	socklen_t clientAddrLen = sizeof(clientAddr);
-	getpeername(clientSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
+	sockaddr_in clientAddress{};
+	socklen_t clientAddrLen = sizeof(clientAddress);
+	getpeername(clientSocket, (struct sockaddr*)&clientAddress, &clientAddrLen);
 	
 	{
 		std::lock_guard<std::mutex> usersLock{ _stdoutMutex };
 		for (size_t i{}; i < connectedSockets.size(); ++i) {
 			std::pair<sockaddr_in, SOCKET> tmp = connectedSockets[i];
-			if ((tmp.first.sin_addr.S_un.S_addr == clientAddr.sin_addr.S_un.S_addr && tmp.first.sin_port == clientAddr.sin_port) && tmp.second == clientSocket) {
+			if ((tmp.first.sin_addr.S_un.S_addr == clientAddr.sin_addr.S_un.S_addr && tmp.first.sin_port == clientAddress.sin_port) && tmp.second == clientSocket) {
 				connectedSockets.erase(connectedSockets.begin() + i);
 			}
 		}

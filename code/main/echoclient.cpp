@@ -386,7 +386,8 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 
 				std::cout << std::endl;
 				std::cout << "==========RECV START==========" << std::endl;
-				std::cout << "Now listening for messages on: " << clientIP<< ':' << ntohs(sin.sin_port) << '\n';
+				std::cout << "Now listening for messages on: " << clientIP << ':' << ntohs(sin.sin_port) << '\n';
+				std::cout << "Session ID: " << sessionID << std::endl;
 
 				/// UDP SESSION START ACK
 				std::cout << "Start UDP session...\n";
@@ -434,16 +435,32 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 						}
 						else if (text[0] == static_cast<u_char>(FLGID::FILE))
 						{
-							packetBuffer.push(Packet::DecodePacket_ntohl(text));
+							Packet filePacket = Packet::DecodePacket_ntohl(text);
 
+							/// RESEND ACKS in the event of packet loss
+							if (filePacket.SequenceNo < sequenceNo)
+							{
+								std::cout << "ACK [" << filePacket.SequenceNo << "] resent.\n";
+								std::string resendAkString = filePacket.GetBuffer_htonl();
+								const int bytesSent = sendto(UDPsocket, resendAkString.c_str(), static_cast<int>(resendAkString.size()), 0, (sockaddr*)&serverAddress, size);
+								if (bytesSent == SOCKET_ERROR)
+								{
+									std::cout << WSAGetLastError();
+									std::cerr << " send() failed." << std::endl;
+									break;
+								}
+								continue;
+							}
+							packetBuffer.push(filePacket);
 							// if the sequenceNo is correct
 							while (!packetBuffer.empty() && packetBuffer.top().SequenceNo == sequenceNo)
 							{
 								// Create ACK & Append
-								AppendPacketToFile(packetBuffer.top(), filePath);
+								recievedPackets.push_back(packetBuffer.top());
 								Packet ack(packetBuffer.top().SessionID, sequenceNo);
-								packetBuffer.pop();
 
+								std::cout << "Packet [" << sequenceNo << "] with SessionID [" << sessionID << "] recieved.\n";
+								packetBuffer.pop();
 
 								std::string ackString = ack.GetBuffer_htonl();
 								const int bytesSent = sendto(UDPsocket, ackString.c_str(), static_cast<int>(ackString.size()), 0, (sockaddr*)&serverAddress, size);
@@ -460,7 +477,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 						//recievedPackets.push_back(); // Add the packets 
 					}
 				}
-				//UnpackToFile(recievedPackets, filePath);
+				UnpackToFile(recievedPackets, filePath);
 				std::cout << "Download complete\n";
 				std::cout << "==========RECV END==========" << std::endl;
 				continue;
