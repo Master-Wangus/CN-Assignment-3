@@ -216,6 +216,7 @@ std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const s
 {
 	std::vector<ULONG> segmentIDs;
 	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
+	if (packetVector.begin()->SequenceNo == 0) outputFile.clear();
 
 	for (ULONG segmentID{}; segmentID < packetVector.size(); ++segmentID)
 	{
