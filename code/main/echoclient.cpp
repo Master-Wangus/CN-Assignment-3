@@ -341,7 +341,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				// A non-blocking call returned no data; sleep and try again.
 				using namespace std::chrono_literals;
 				std::this_thread::sleep_for(200ms);
-				continue;
+				continue;	
 			}
 		}
 		else if (bytesReceived_TCP == 0) //check if not receiving any messages

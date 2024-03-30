@@ -6,9 +6,9 @@
     <ClCompile Include="..\packet.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\packet.h" />
     <ClInclude Include="..\taskqueue.h" />
     <ClInclude Include="..\taskqueue.hpp" />
     <ClInclude Include="..\Utils.h" />
+    <ClInclude Include="..\packet.h" />
   </ItemGroup>
 </Project>
