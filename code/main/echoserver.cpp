@@ -2,8 +2,11 @@
 *****************************************************************/
 /*!
 \file echoserver.cpp
-\author koh wei ren, weiren.koh, 2202110
+\author Koh Wei Ren, weiren.koh, 2202110
+		Pang Zhi Kai, p.zhikai, 2201573
+		
 \par weiren.koh@digipen.edu
+	 p.zhikai@digipen.edu
 \date 03/03/2024
 \brief This source file implements a multithreaded server that accepts multiple connection to client but only shuts down
 when told to. Disconnecting clients will not shut the server down.
@@ -14,7 +17,7 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 /* End Header
 *******************************************************************/
 
-///*******************************************************************************
+//*******************************************************************************
 // * A multi-threaded TCP/IP server application
 // ******************************************************************************/
 
@@ -64,6 +67,9 @@ uint16_t UDPPortNumber{}, TCPPortNumber{};
 SOCKET listenerSocket{}, udpSocket{};
 std::string g_DownloadRepo{};
 static u_long g_SessionID{};
+float g_PackLossRate{};
+size_t g_WindowSize{};
+DWORD g_AckTimer{};
 std::unordered_map<u_long, std::priority_queue<u_long, std::vector<u_long>, std::greater<u_long>>> g_Packets;
 
 int main()
@@ -126,6 +132,18 @@ int main()
 		std::cout << "Enter a valid download repository: ";
 	}
 
+	std::cout << "Window Size [1, 100]: ";
+	std::cin >> g_WindowSize;
+	std::cout << std::endl;
+
+
+	std::cout << "Packet loss rate [0.f, 1.f]: ";
+	std::cin >> g_PackLossRate;
+	std::cout << std::endl;
+
+	std::cout << "ACK Timer [50ms, 500ms]: ";
+	std::cin >> g_AckTimer;
+	std::cout << std::endl;
 
 	// -------------------------------------------------------------------------
 	// Resolve own host name into IP addresses (in a singly-linked list).
@@ -338,12 +356,9 @@ bool execute(SOCKET clientSocket)
 	bool isDownloading = false;
 	std::vector<Packet> filePackets;
 	size_t index{};
-	constexpr size_t windowSize = 5;
 	u_long currSequence{}, threadSessionID{static_cast<u_long>(-1)};
 	std::unordered_map<size_t, std::chrono::high_resolution_clock::time_point> timerBuffer;
-	int packetLossRate = 3;
-	bool packetLoss = true;
-	DWORD timeout = 200; // in milli
+	DWORD timeout{}; // in milli
 	sockaddr_in clientAddr{}; // Client address UDP
 	int clientAddrSize = sizeof(clientAddr);
 
@@ -376,7 +391,7 @@ bool execute(SOCKET clientSocket)
 					{
 						std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
 						/// RETRANSMISSION
-						std::cout << "Retransmitting Packet " << currSequence <<  " SessionID: " << threadSessionID << '\n';
+						std::cout << "[TIMEOUT] Retransmitting Packet [" << currSequence <<  "] SessionID [" << threadSessionID << "]\n";
 						const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 						if (bytesSent == SOCKET_ERROR)
 						{
@@ -422,10 +437,10 @@ bool execute(SOCKET clientSocket)
 				// buffer to check acknolwdgement
 				timerBuffer.erase(packet.SequenceNo);
 				g_Packets[packet.SessionID].push(packet.SequenceNo);
-				std::cout << "Recieved ACK: " << packet.SequenceNo << " | SessionID: " << packet.SessionID << '\n';
+				std::cout << "Recieved ACK [" << packet.SequenceNo << "] SessionID [" << packet.SessionID << "]\n";
 			}
 			// Check if there is any pending acknowldgement
-			if (!g_Packets[threadSessionID].empty() && currSequence == g_Packets[threadSessionID].top())
+			if (!g_Packets[threadSessionID].empty() && currSequence <= g_Packets[threadSessionID].top())
 			{
 				g_Packets[threadSessionID].pop();
 				++currSequence;
@@ -437,7 +452,7 @@ bool execute(SOCKET clientSocket)
 				{
 					std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
 					/// RETRANSMISSION
-					std::cout << "Retransmitting Packet " << currSequence << " SessionID: " << threadSessionID << '\n';
+					std::cout << "Retransmitting Packet [" << currSequence << "] SessionID [" << threadSessionID << "]\n";
 
 					const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 					if (bytesSent == SOCKET_ERROR)
@@ -446,16 +461,16 @@ bool execute(SOCKET clientSocket)
 						std::cerr << " send() failed." << std::endl;
 						break;
 					}
-					//timerBuffer[index] = std::chrono::high_resolution_clock::now();
+					timerBuffer[index] = std::chrono::high_resolution_clock::now();
 					continue;
 				}
 			}
 			// Replace filePackets to window size
-			if (index < currSequence + windowSize && index < filePackets.size())
+			if (index < currSequence + g_WindowSize && index < filePackets.size())
 			{
-				if (packetLoss && packetLossRate && (index % packetLossRate == 0)) // packet loss check
+				if (static_cast<float>(rand()) / RAND_MAX <= g_PackLossRate) // packet loss check
 				{
-					std::cout << "Packet [" << index << "] with SessionID: " << threadSessionID << " lost.\n";
+					std::cout << "Packet [" << index << "] with SessionID [" << threadSessionID << "] lost.\n";
 					index++;
 					continue;
 				}
@@ -491,6 +506,7 @@ bool execute(SOCKET clientSocket)
 				filePackets.clear(); // Reset the download Packets
 				std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 			}
+			continue; // loops through the UDP section
 		}
 
 		/// TCP reciever
@@ -554,7 +570,7 @@ bool execute(SOCKET clientSocket)
 				// Ready all UDP variables
 				filePackets =  PackFromFile(g_SessionID, filePath);
 				threadSessionID = g_SessionID;
-				timeout = 200;
+				timeout = g_AckTimer;
 				++g_SessionID;
 				isDownloading = true;
 				
@@ -567,8 +583,8 @@ bool execute(SOCKET clientSocket)
 				// Print out ip and Session
 				char clientIp_Print[INET_ADDRSTRLEN]; //set buffer to be a macro that decides the length based on the connection type eg ipv4, ipv6 etc etc
 				inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp_Print, INET_ADDRSTRLEN); //set buffer to be a macro that decides the length based on the connection type eg ipv4, ipv6 etc etc
-				std::cout << "==========DOWNLOAD START==========" << std::endl;
-				std::cout << clientIp_Print << ':' << ntohs(clientAddr.sin_port) << "	SessionID: " << threadSessionID << std::endl;
+				std::cout << "==========DOWNLOAD[" << threadSessionID << "] START==========" << std::endl;
+				std::cout << clientIp_Print << ':' << ntohs(clientAddr.sin_port) << " SessionID [" << threadSessionID << "]\n";
 				std::cout << std::endl;
 
 			}

@@ -1,3 +1,16 @@
+/* Start Header
+*****************************************************************/
+/*!
+\file Utils.cpp
+\authors Koh Wei Ren, weiren.koh, 2202110,
+		 Pang Zhi Kai, p.zhikai, 2201573
+\par weiren.koh@digipen.edu
+	 p.zhikai@digipen.edu
+\date 18/03/2024
+\brief A file containing utlity functions
+*/
+/* End Header
+*******************************************************************/
 #include "Utils.h"
 
 #include <Windows.h>		// windows API

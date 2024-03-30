@@ -1,16 +1,23 @@
+/* Start Header
+*****************************************************************/
+/*!
+\file packet.cpp
+\authors Koh Wei Ren, weiren.koh, 2202110,
+		 Pang Zhi Kai, p.zhikai, 2201573
+\par weiren.koh@digipen.edu
+\date 03/03/2024
+\brief A multithreaded client that sends formatted data to a server. Has dedicated threads for receiving and sending information.
+Copyright (C) 20xx DigiPen Institute of Technology.
+Reproduction or disclosure of this file or its contents without the
+prior written consent of DigiPen Institute of Technology is prohibited.
+*/
+/* End Header
+*******************************************************************/
+
 #include "packet.h"
 #include "Utils.h"
 #include <fstream>
 #include <iostream>
-
-//Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart) :
-//	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength), Data{}
-//{
-//	for (size_t i{}; i < DataLength; ++i)
-//	{
-//		Data.append(*(bufferStart + FileOffset + i), sizeof(UCHAR));
-//	}
-//}
 
 Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const std::string& packetData) :
 	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength), Data(packetData)
@@ -147,76 +154,6 @@ std::string Packet::GetEndPacket()
 bool Packet::isACK() const
 {
 	return Flag == (UCHAR)FLGID::ACK;
-}
-
-Segment::Segment(const USHORT source, const USHORT dest, const ::Packet& packet)
-	: SourcePort(source), DestPort(dest), Length(static_cast<u_short>(sizeof(USHORT) * 4 + packet.GetFullLength())), Checksum(0), Packet(packet) {} // Source + Dest + Length + Checksum = 32
-
-
-Segment::Segment(const USHORT source, const USHORT dest, const std::string& packet)
-	: SourcePort(source), DestPort(dest), Length(static_cast<u_short>(sizeof(USHORT) * 4 + packet.length())), Checksum(0), Packet(Packet::DecodePacket_ntohl(packet)) {} // Source + Dest + Length + Checksum = 32
-
-std::string Segment::GetBuffer() const
-{
-	std::string buffer;
-	USHORT newCheckSum;
-
-	buffer.append(reinterpret_cast<const char*>(&SourcePort), sizeof(SourcePort));
-	buffer.append(reinterpret_cast<const char*>(&DestPort), sizeof(DestPort));
-	buffer.append(reinterpret_cast<const char*>(&Length), sizeof(Length));
-	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet.GetBuffer();
-
-	newCheckSum = Utils::ToChecksum(buffer);
-	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
-
-	return buffer;
-}
-
-std::string Segment::GetNetworkBuffer() const
-{
-	std::string buffer;
-	USHORT newCheckSum;
-
-	// Serialize each field and append to the serializedData string
-	USHORT networkSourcePort = htons(SourcePort);
-	USHORT networkDestPort = htons(DestPort);
-	USHORT networkLength = htons(Length);
-
-	buffer.append(reinterpret_cast<const char*>(&networkSourcePort), sizeof(networkSourcePort));
-	buffer.append(reinterpret_cast<const char*>(&networkDestPort), sizeof(networkDestPort));
-	buffer.append(reinterpret_cast<const char*>(&networkLength), sizeof(networkLength));
-	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet.GetBuffer_htonl();
-
-	newCheckSum = htons(Utils::ToChecksum(buffer));
-	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
-
-	return buffer;
-}
-
-USHORT Segment::UpdateChecksum()
-{
-	USHORT newCheckSum = htons(Utils::ToChecksum(GetNetworkBuffer()));
-	Checksum = htons(newCheckSum);
-	return newCheckSum;
-}
-
-Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken)
-{
-	USHORT SourcePort = Utils::StringTo_ntohs(networkSegmentString.substr(0, sizeof(USHORT)));
-	USHORT DestPort = Utils::StringTo_ntohs(networkSegmentString.substr(2, sizeof(USHORT)));
-	USHORT Length = Utils::StringTo_ntohs(networkSegmentString.substr(4, sizeof(USHORT)));
-	USHORT Checksum = Utils::StringTo_ntohs(networkSegmentString.substr(6, sizeof(USHORT)));
-	std::string PacketStr = networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum));
-
-	Segment seggs = Segment(SourcePort, DestPort, PacketStr); // constructor already handles network ordered packet
-	if (seggs.UpdateChecksum() == Checksum)
-		isChecksumBroken = false;
-	else
-		isChecksumBroken = true;
-
-	return seggs;
 }
 
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path)

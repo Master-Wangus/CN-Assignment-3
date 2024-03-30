@@ -3,7 +3,9 @@
 /*!
 \file echoclient.cpp
 \author Koh Wei Ren, weiren.koh, 2202110
+		Pang Zhi Kai, p.zhikai, 2201573
 \par weiren.koh@digipen.edu
+	 p.zhikai@digipen.edu
 \date 03/03/2024
 \brief A multithreaded client that sends formatted data to a server. Has dedicated threads for receiving and sending information.
 Copyright (C) 20xx DigiPen Institute of Technology.
@@ -56,13 +58,14 @@ enum CMDID {
 
 std::string g_downloadPath;
 std::string g_fileName;
+size_t g_WindowSize{};
+float g_packLossRate{};
 // This program requires one extra command-line parameter: a server hostname.
 int main(int argc, char** argv)
 {
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{}, 
-				slidingWindowSz{}, packetLossRate{};
+	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{};
 
 	std::cout << "Server IP Address: ";
 	std::cin >> ServerIP;
@@ -84,12 +87,8 @@ int main(int argc, char** argv)
 	std::cin >> g_downloadPath;
 	std::cout << std::endl;
 
-	std::cout << "Sliding window size: ";
-	std::cin >> slidingWindowSz;
-	std::cout << std::endl;
-
-	std::cout << "Packet loss rate: ";
-	std::cin >> packetLossRate;
+	std::cout << "Packet loss rate [0.f, 1.f]: ";
+	std::cin >> g_packLossRate;
 	std::cout << std::endl;
 
 
@@ -438,10 +437,10 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 							Packet filePacket = Packet::DecodePacket_ntohl(text);
 
 							/// RESEND ACKS in the event of packet loss
-							if (filePacket.SequenceNo < sequenceNo)
+							if (filePacket.SequenceNo < sequenceNo) // if the file has been added before
 							{
 								std::cout << "ACK [" << filePacket.SequenceNo << "] resent.\n";
-								std::string resendAkString = filePacket.GetBuffer_htonl();
+								std::string resendAkString = Packet(filePacket.SessionID, filePacket.SequenceNo).GetBuffer_htonl();
 								const int bytesSent = sendto(UDPsocket, resendAkString.c_str(), static_cast<int>(resendAkString.size()), 0, (sockaddr*)&serverAddress, size);
 								if (bytesSent == SOCKET_ERROR)
 								{
@@ -452,15 +451,23 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 								continue;
 							}
 							packetBuffer.push(filePacket);
+							std::cout << "Packet [" << filePacket.SequenceNo << "] with SessionID [" << filePacket.SessionID << "] recieved.\n";
 							// if the sequenceNo is correct
 							while (!packetBuffer.empty() && packetBuffer.top().SequenceNo == sequenceNo)
 							{
+
 								// Create ACK & Append
 								recievedPackets.push_back(packetBuffer.top());
 								Packet ack(packetBuffer.top().SessionID, sequenceNo);
-
-								std::cout << "Packet [" << sequenceNo << "] with SessionID [" << sessionID << "] recieved.\n";
 								packetBuffer.pop();
+								++sequenceNo;
+								
+								// Loss of acks
+								if ((static_cast<float>(rand()) / RAND_MAX <= g_packLossRate) && sequenceNo == recievedPackets.size())
+								{
+									std::cout << "ACK [" << filePacket.SequenceNo << "] with SessionID [" << filePacket.SessionID << "] lost.\n";
+									continue;
+								}
 
 								std::string ackString = ack.GetBuffer_htonl();
 								const int bytesSent = sendto(UDPsocket, ackString.c_str(), static_cast<int>(ackString.size()), 0, (sockaddr*)&serverAddress, size);
@@ -470,8 +477,8 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 									std::cerr << " send() failed." << std::endl;
 									break;
 								}
+								std::cout << "ACK [" << filePacket.SequenceNo << "] with SessionID [" << filePacket.SessionID << "] sent.\n";
 								
-								++sequenceNo;
 							}
 						}
 						//recievedPackets.push_back(); // Add the packets 

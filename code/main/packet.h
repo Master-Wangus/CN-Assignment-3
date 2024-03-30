@@ -1,3 +1,18 @@
+/* Start Header
+*****************************************************************/
+/*!
+\file packet.h
+\authors Koh Wei Ren, weiren.koh, 2202110, 
+         Pang Zhi Kai, p.zhikai, 2201573
+\par weiren.koh@digipen.edu
+\date 03/03/2024
+\brief A multithreaded client that sends formatted data to a server. Has dedicated threads for receiving and sending information.
+Copyright (C) 20xx DigiPen Institute of Technology.
+Reproduction or disclosure of this file or its contents without the
+prior written consent of DigiPen Institute of Technology is prohibited.
+*/
+/* End Header
+*******************************************************************/
 #pragma once
 
 #include <vector>
@@ -32,7 +47,6 @@ struct Packet
     static std::string GetStartPacket();
     static std::string GetEndPacket();
 
-
     // Packet variables are to be stored in host order
     UCHAR Flag;
     ULONG SessionID;
@@ -42,25 +56,6 @@ struct Packet
     std::string Data;
 };
 
-struct Segment
-{
-    Segment(const USHORT source, const USHORT dest, const Packet& packet); // Length is calculated using .length on the packet 
-    Segment(const USHORT source, const USHORT dest, const std::string& packet); // ASSUMPTION: packet string only contains the packet info 
-                                                                                //             and is in network order
-
-    std::string GetBuffer() const; // in bytes! will set the checksum value as well
-    std::string GetNetworkBuffer() const; // we return the whole segment in an already nicely network ordered buffer in bytes
-    USHORT UpdateChecksum(); // will return checksum in host order but set checksum variable to network order
-
-    USHORT SourcePort;
-    USHORT DestPort;
-    USHORT Length; // Will be used by the client to get the whole packet
-    USHORT Checksum;
-    Packet Packet; 
-};
-
-// Decode Utility Functions
-Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken);
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path);
 void AppendPacketToFile(const Packet& packetVector, const std::filesystem::path filePath); // Appends a packet to the file
 std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath); // 
