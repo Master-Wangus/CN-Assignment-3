@@ -63,8 +63,6 @@ float g_packLossRate{};
 // This program requires one extra command-line parameter: a server hostname.
 int main(int argc, char** argv)
 {
-	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-
 	std::string ServerIP{}, TCPServerPort{}, UDPServerPort{}, UDPClientPort{};
 
 	std::cout << "Server IP Address: ";
@@ -319,7 +317,6 @@ int main(int argc, char** argv)
 
 	 closesocket(UDPsocket);
 	 closesocket(TCPSocket); //close socket fr
-	 CoUninitialize();
 	WSACleanup(); //goodnight 
 }
 
