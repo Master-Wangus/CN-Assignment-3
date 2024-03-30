@@ -102,6 +102,7 @@ int main()
 		WSACleanup();
 		return 0;
 	}
+	std::cout << std::endl;
 	std::string TCPportString{ std::to_string(TCPPortNumber) };
 
 	//uint16_t UDPPortNumber{};
@@ -111,6 +112,7 @@ int main()
 		WSACleanup();
 		return 0;
 	}
+	std::cout << std::endl;
 	std::string UDPportString{ std::to_string(UDPPortNumber) };
 
 	std::ifstream fs("Config.txt", std::ios::binary); // open the config file
@@ -131,6 +133,7 @@ int main()
 		if (std::filesystem::exists(g_DownloadRepo)) break;
 		std::cout << "Enter a valid download repository: ";
 	}
+	std::cout << std::endl;
 
 	std::cout << "Window Size [1, 100]: ";
 	std::cin >> g_WindowSize;
@@ -141,7 +144,7 @@ int main()
 	std::cin >> g_PackLossRate;
 	std::cout << std::endl;
 
-	std::cout << "ACK Timer [50ms, 500ms]: ";
+	std::cout << "ACK Timer [10ms, 500ms]: ";
 	std::cin >> g_AckTimer;
 	std::cout << std::endl;
 
@@ -438,16 +441,17 @@ bool execute(SOCKET clientSocket)
 				std::cout << "Recieved ACK [" << packet.SequenceNo << "] SessionID [" << packet.SessionID << "]\n";
 			}
 			// Check if there is any pending acknowldgement
-			if (!g_Packets[threadSessionID].empty() && currSequence <= g_Packets[threadSessionID].top())
+			if (!g_Packets[threadSessionID].empty() && currSequence == g_Packets[threadSessionID].top())
 			{
 				g_Packets[threadSessionID].pop();
 				++currSequence;
 			}
-			else if (!g_Packets[threadSessionID].empty() && currSequence != g_Packets[threadSessionID].top()) // potential packet loss occured
+			else if (!g_Packets[threadSessionID].empty() && currSequence < g_Packets[threadSessionID].top()) // potential packet loss occured
 			{
 				// check for packet loss
 				if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - timerBuffer[currSequence]).count() >= timeout)
 				{
+					g_Packets[threadSessionID].pop();
 					std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
 					/// RETRANSMISSION
 					std::cout << "Retransmitting Packet [" << currSequence << "] SessionID [" << threadSessionID << "]\n";
