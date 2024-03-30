@@ -1,32 +1,58 @@
+/* Start Header
+*****************************************************************/
+/*!
+\file packet.cpp
+\authors Koh Wei Ren, weiren.koh, 2202110,
+		 Pang Zhi Kai, p.zhikai, 2201573
+\par weiren.koh@digipen.edu
+\date 03/03/2024
+\brief Implementation of a packet class that encapsulates data recieved from the server or client.
+Copyright (C) 20xx DigiPen Institute of Technology.
+Reproduction or disclosure of this file or its contents without the
+prior written consent of DigiPen Institute of Technology is prohibited.
+*/
+/* End Header
+*******************************************************************/
+
 #include "packet.h"
 #include "Utils.h"
 #include <fstream>
 #include <iostream>
-
-constexpr size_t PACKET_SIZE = 1000000; // 1 MB
-
-Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const char* bufferStart) :
-	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength)
-{
-	for (size_t i{}; i < DataLength; ++i)
-	{
-		Data.append(*(bufferStart + FileOffset + i), sizeof(UCHAR));
-	}
-}
 
 Packet::Packet(const ULONG sessionID, const ULONG sequenceNo, const ULONG fileOffset, const ULONG dataLength, const std::string& packetData) :
 	Flag((UCHAR)FLGID::FILE), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(fileOffset), DataLength(dataLength), Data(packetData)
 {
 }
 
-Packet::Packet(const bool isAcked, const ULONG sessionID, const ULONG sequenceNo) : Flag((isAcked) ? (UCHAR)FLGID::ACK : (UCHAR)FLGID::NAK), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(0), DataLength(0)
+Packet::Packet(const ULONG sessionID, const ULONG sequenceNo) : Flag((UCHAR)FLGID::ACK), SessionID(sessionID), SequenceNo(sequenceNo), FileOffset(0), DataLength(0)
 {
 
 }
 
-size_t Packet::GetFullLength() const
+Packet::Packet(u_char flag) : Flag(flag), SessionID{}, SequenceNo{}, FileOffset{}, DataLength{}
 {
-	return sizeof(UCHAR) + sizeof(ULONG) * 4 + DataLength;
+}
+
+int Packet::GetFullLength() const
+{
+	size_t length{};
+	switch (static_cast<FLGID>(Flag))
+	{
+	case FLGID::FILE:
+	{
+		length += DataLength + 2 * sizeof(ULONG); // Data + FileOffset + DataLength
+		__fallthrough;
+	}
+	case FLGID::ACK:
+	{
+		length += 2 * sizeof(ULONG); // SessionID + Sequence No.
+		__fallthrough;
+	}
+	default:
+		length += 1; // Flag
+	}
+
+	return static_cast<int>(length);
 }
 
 std::string Packet::GetBuffer() const
@@ -47,9 +73,9 @@ std::string Packet::GetBuffer() const
 	return buffer;
 }
 
-std::string Packet::GetNetworkBuffer() const
+std::string Packet::GetBuffer_htonl() const
 {
-	std::string buffer;
+	std::string buffer{};
 	buffer.append(reinterpret_cast<const char*>(&Flag), sizeof(Flag));
 	
 	// Serialize each field and append to the serializedData string
@@ -59,7 +85,7 @@ std::string Packet::GetNetworkBuffer() const
 	buffer.append(reinterpret_cast<const char*>(&networkSessionID), sizeof(networkSessionID));
 	buffer.append(reinterpret_cast<const char*>(&networkSequenceNo), sizeof(networkSequenceNo));
 
-	if (Flag & (UCHAR)FLGID::FILE)
+	if (Flag == (UCHAR)FLGID::FILE)
 	{
 		ULONG networkFileOffset = htonl(FileOffset);
 		ULONG networkDatalength = htonl(DataLength);
@@ -72,47 +98,16 @@ std::string Packet::GetNetworkBuffer() const
 	return buffer;
 }
 
-Packet Packet::DecodePacket(const std::string& packetString)
-{
-	auto stringToUlong = [](const std::string& str)
-		{
-			u_long ret = 0;
-			std::memcpy(&ret, str.data(), sizeof(ULONG));
-			return ret;
-		};
-	UCHAR Flag = packetString[0];
-	ULONG SessionID = stringToUlong(packetString.substr(1, sizeof(ULONG)));
-	ULONG SequenceNo = stringToUlong(packetString.substr(5, sizeof(ULONG)));
-
-	if (Flag & (UCHAR)FLGID::FILE)
-	{
-		ULONG FileOffset = stringToUlong(packetString.substr(9, sizeof(ULONG)));
-		ULONG DataLength = stringToUlong(packetString.substr(13, sizeof(ULONG)));
-		std::string Data = packetString.substr(17);
-
-		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data.c_str());
-	}
-	else
-	{
-		if (Flag & (UCHAR)FLGID::ACK)
-		{
-			return Packet(true, SessionID, SequenceNo);
-		}
-		else
-		{
-			return Packet(false, SessionID, SequenceNo);
-
-		}
-	}
-}
-
-Packet Packet::DecodePacketNetwork(const std::string& networkPacketString)
+Packet Packet::DecodePacket_ntohl(const std::string& networkPacketString)
 {
 	UCHAR Flag = networkPacketString[0];
+	if (Flag == (UCHAR)FLGID::START || Flag == (UCHAR)FLGID::FIN) 
+		return Packet(Flag);
+
 	ULONG SessionID = Utils::StringTo_ntohl(networkPacketString.substr(1, sizeof(ULONG)));
 	ULONG SequenceNo = Utils::StringTo_ntohl(networkPacketString.substr(5, sizeof(ULONG)));
 
-	if (Flag & (UCHAR)FLGID::FILE)
+	if (Flag == (UCHAR)FLGID::FILE)
 	{
 		ULONG FileOffset = Utils::StringTo_ntohl(networkPacketString.substr(9, sizeof(ULONG)));
 		ULONG DataLength = Utils::StringTo_ntohl(networkPacketString.substr(13, sizeof(ULONG)));
@@ -122,114 +117,43 @@ Packet Packet::DecodePacketNetwork(const std::string& networkPacketString)
 	}
 	else
 	{
-		if (Flag & (UCHAR)FLGID::ACK)
-		{
-			return Packet(true, SessionID, SequenceNo);
-		}
-		else
-		{
-			return Packet(false, SessionID, SequenceNo);
-
-		}
+		return Packet(SessionID, SequenceNo);
 	}
+}
+
+Packet Packet::DecodePacket_htonl(const std::string& hostPacketString)
+{
+	UCHAR Flag = hostPacketString[0];
+	ULONG SessionID = Utils::StringTo_htonl(hostPacketString.substr(1, sizeof(ULONG)));
+	ULONG SequenceNo = Utils::StringTo_htonl(hostPacketString.substr(5, sizeof(ULONG)));
+
+	if (Flag & (UCHAR)FLGID::FILE)
+	{
+		ULONG FileOffset = Utils::StringTo_htonl(hostPacketString.substr(9, sizeof(ULONG)));
+		ULONG DataLength = Utils::StringTo_htonl(hostPacketString.substr(13, sizeof(ULONG)));
+		std::string Data = hostPacketString.substr(17);
+
+		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data.c_str());
+	}
+	else
+	{
+		return Packet(SessionID, SequenceNo);
+	}
+}
+
+std::string Packet::GetStartPacket()
+{
+	return std::string{ static_cast<u_char>(FLGID::START) };
+}
+
+std::string Packet::GetEndPacket()
+{
+	return std::string{static_cast<u_char>(FLGID::FIN)};
 }
 
 bool Packet::isACK() const
 {
-	return Flag & (UCHAR)FLGID::ACK;
-}
-
-bool Packet::isNAK() const
-{
-	return Flag & (UCHAR)FLGID::NAK;
-}
-
-Segment::Segment(const USHORT source, const USHORT dest, const ::Packet& packet)
-	: SourcePort(source), DestPort(dest), Length(static_cast<u_short>(sizeof(USHORT) * 4 + packet.GetFullLength())), Checksum(0), Packet(packet) {} // Source + Dest + Length + Checksum = 32
-
-
-Segment::Segment(const USHORT source, const USHORT dest, const std::string& packet)
-	: SourcePort(source), DestPort(dest), Length(static_cast<u_short>(sizeof(USHORT) * 4 + packet.length())), Checksum(0), Packet(Packet::DecodePacketNetwork(packet)) {} // Source + Dest + Length + Checksum = 32
-
-std::string Segment::GetBuffer() const
-{
-	std::string buffer;
-	USHORT newCheckSum;
-
-	buffer.append(reinterpret_cast<const char*>(&SourcePort), sizeof(SourcePort));
-	buffer.append(reinterpret_cast<const char*>(&DestPort), sizeof(DestPort));
-	buffer.append(reinterpret_cast<const char*>(&Length), sizeof(Length));
-	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet.GetBuffer();
-
-	newCheckSum = Utils::ToChecksum(buffer);
-	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
-
-	return buffer;
-}
-
-std::string Segment::GetNetworkBuffer() const
-{
-	std::string buffer;
-	USHORT newCheckSum;
-
-	// Serialize each field and append to the serializedData string
-	USHORT networkSourcePort = htons(SourcePort);
-	USHORT networkDestPort = htons(DestPort);
-	USHORT networkLength = htons(Length);
-
-	buffer.append(reinterpret_cast<const char*>(&networkSourcePort), sizeof(networkSourcePort));
-	buffer.append(reinterpret_cast<const char*>(&networkDestPort), sizeof(networkDestPort));
-	buffer.append(reinterpret_cast<const char*>(&networkLength), sizeof(networkLength));
-	buffer.append(reinterpret_cast<const char*>(&Checksum), sizeof(Checksum));
-	buffer += Packet.GetNetworkBuffer();
-
-	newCheckSum = htons(Utils::ToChecksum(buffer));
-	buffer.insert(sizeof(SourcePort) + sizeof(DestPort) + sizeof(Length), reinterpret_cast<const char*>(&newCheckSum));
-
-	return buffer;
-}
-
-USHORT Segment::UpdateChecksum()
-{
-	USHORT newCheckSum = htons(Utils::ToChecksum(GetNetworkBuffer()));
-	Checksum = htons(newCheckSum);
-	return newCheckSum;
-}
-
-Segment DecodeSegmentNetwork(const std::string& networkSegmentString, bool& isChecksumBroken)
-{
-	USHORT SourcePort = Utils::StringTo_ntohs(networkSegmentString.substr(0, sizeof(USHORT)));
-	USHORT DestPort = Utils::StringTo_ntohs(networkSegmentString.substr(2, sizeof(USHORT)));
-	USHORT Length = Utils::StringTo_ntohs(networkSegmentString.substr(4, sizeof(USHORT)));
-	USHORT Checksum = Utils::StringTo_ntohs(networkSegmentString.substr(6, sizeof(USHORT)));
-	std::string PacketStr = networkSegmentString.substr(8, Length - sizeof(SourcePort) - sizeof(DestPort) - sizeof(Length) - sizeof(Checksum));
-
-	Segment seggs = Segment(SourcePort, DestPort, PacketStr); // constructor already handles network ordered packet
-	if (seggs.UpdateChecksum() == Checksum)
-		isChecksumBroken = false;
-	else
-		isChecksumBroken = true;
-
-	return seggs;
-}
-
-bool IfAckReturnSequence(const std::string& networkSegmentString, bool& isChecksumBroken, bool& isAcked, ULONG& sequenceNo)
-{
-	Segment seggs = DecodeSegmentNetwork(networkSegmentString, isChecksumBroken);
-	if (seggs.Packet.isACK() || seggs.Packet.isNAK())
-	{
-		sequenceNo = seggs.Packet.SequenceNo;
-		if (seggs.Packet.isACK())
-		{
-			isAcked = true;
-		}
-		else if(seggs.Packet.isNAK())
-			isAcked = false;
-		return true;
-	}
-	else
-		return false;
+	return Flag == (UCHAR)FLGID::ACK;
 }
 
 std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::path& path)
@@ -271,22 +195,32 @@ std::vector<Packet> PackFromFile(const ULONG sessionID, const std::filesystem::p
 	return packets;
 }
 
+void AppendPacketToFile(const Packet& packet, const std::filesystem::path filePath)
+{
+	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
+
+	outputFile.write(packet.Data.c_str(), packet.DataLength);
+
+	outputFile.close();
+
+	if (outputFile.bad())
+	{
+		std::cerr << "An error occurred while writing to the file: " << filePath << std::endl;
+	}
+	else {
+		std::cout << "File successfully reconstructed from packet: " << packet.SequenceNo << std::endl;
+	}
+}
+
 std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath)
 {
 	std::vector<ULONG> segmentIDs;
-	std::ofstream outputFile(filePath, std::ios::binary | std::ios::out);
+	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
+	if (packetVector.begin()->SequenceNo == 0) outputFile.clear();
 
 	for (ULONG segmentID{}; segmentID < packetVector.size(); ++segmentID)
 	{
-		if ((segmentID) != packetVector[segmentID].SequenceNo)
-		{
-			segmentIDs.push_back(segmentID);
-		}
-		else
-		{
-			outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
-		}
-
+		outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
 	}
 	outputFile.close();
 
