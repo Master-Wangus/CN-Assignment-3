@@ -353,7 +353,6 @@ bool execute(SOCKET clientSocket)
 
 
 	// UDP 
-	bool isDownloading = false;
 	std::vector<Packet> filePackets;
 	size_t index{};
 	u_long currSequence{}, threadSessionID{static_cast<u_long>(-1)};
@@ -365,7 +364,7 @@ bool execute(SOCKET clientSocket)
 	while (true) //loop until client disconnects
 	{
 		/// UDP DOWNLOAD
-		if (isDownloading)
+		if (!filePackets.empty())
 		{
 			int errorCode = setsockopt(udpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 			if (errorCode != NO_ERROR)
@@ -411,7 +410,6 @@ bool execute(SOCKET clientSocket)
 							break;
 						}
 
-						isDownloading = false;
 						index = 0;
 						currSequence = 0;
 						timeout = 0;
@@ -499,7 +497,6 @@ bool execute(SOCKET clientSocket)
 					break;
 				}
 
-				isDownloading = false;
 				timeout = 0;
 				index = 0;
 				currSequence = 0;
@@ -572,7 +569,6 @@ bool execute(SOCKET clientSocket)
 				threadSessionID = g_SessionID;
 				timeout = g_AckTimer;
 				++g_SessionID;
-				isDownloading = true;
 				
 
 				SecureZeroMemory(&clientAddr, sizeof(clientAddr));

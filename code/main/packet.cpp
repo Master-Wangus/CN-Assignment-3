@@ -6,7 +6,7 @@
 		 Pang Zhi Kai, p.zhikai, 2201573
 \par weiren.koh@digipen.edu
 \date 03/03/2024
-\brief A multithreaded client that sends formatted data to a server. Has dedicated threads for receiving and sending information.
+\brief Implementation of a packet class that encapsulates data recieved from the server or client.
 Copyright (C) 20xx DigiPen Institute of Technology.
 Reproduction or disclosure of this file or its contents without the
 prior written consent of DigiPen Institute of Technology is prohibited.

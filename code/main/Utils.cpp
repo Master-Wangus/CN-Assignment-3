@@ -35,7 +35,14 @@ namespace Utils
 		std::memcpy(&output[0], &temp, sizeof(unsigned long)); // Copy the binary data of val into the string
 		return output;
 	}
-
+	/*!***********************************************************************
+	\brief
+	Changes the message length in network order to its string representation in hex form through binary manipulation.
+	\param[in, out] short
+	the long that is the message length to be converted to string
+	\return
+	The string representing the message length in network order
+	*************************************************************************/
 	std::string htonsToString(u_short input) 
 	{
 		u_short temp = htons(input);
@@ -44,20 +51,6 @@ namespace Utils
 		return output;
 	}
 
-	u_long StringTo_uLong(std::string const& input)
-	{
-		u_long ret = 0;
-		std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
-		return ret;
-	}
-
-
-	u_short StringTo_uShort(std::string const& input) 
-	{
-		u_short ret = 0;
-		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
-		return ret;
-	}
 	/*!***********************************************************************
 	\brief
 	To convert the string taken as input which maybe network order and convert it to a unsigned long
@@ -72,20 +65,44 @@ namespace Utils
 		std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
 		return ntohl(ret);
 	}
-
+	/*!***********************************************************************
+	\brief
+	To convert the string taken as input which maybe network order and convert it to a unsigned long
+	for ntohl to process.
+	\param[in, out] string
+	the input string representing the length of the message in network order
+	\return
+	the long representing the system order
+	*************************************************************************/
 	u_short StringTo_ntohs(std::string const& input) {
 		uint16_t ret = 0;
 		std::memcpy(&ret, input.data(), sizeof(u_short)); // copy binary data into the string
 		return ntohs(ret);
 	}
-
+	/*!***********************************************************************
+	\brief
+	To convert the string taken as input which maybe network order and convert it to a unsigned long
+	for ntohl to process.
+	\param[in, out] string
+	the input string representing the length of the message in network order
+	\return
+	the long representing the system order
+	*************************************************************************/
 	u_long StringTo_htonl(std::string const& input)
 	{
 		u_long ret = 0;
 		std::memcpy(&ret, input.data(), sizeof(u_long)); // copy binary data into the string
 		return htonl(ret);
 	}
-
+	/*!***********************************************************************
+	\brief
+	To convert the string taken as input which maybe network order and convert it to a unsigned long
+	for ntohl to process.
+	\param[in, out] string
+	the input string representing the length of the message in network order
+	\return
+	the long representing the system order
+	*************************************************************************/
 	u_short StringTo_htons(std::string const& input)
 	{
 		u_short ret = 0;

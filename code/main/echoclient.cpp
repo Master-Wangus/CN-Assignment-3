@@ -478,7 +478,6 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 								
 							}
 						}
-						//recievedPackets.push_back(); // Add the packets 
 					}
 				}
 				UnpackToFile(recievedPackets, filePath);
