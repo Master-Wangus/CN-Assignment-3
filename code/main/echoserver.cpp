@@ -401,6 +401,7 @@ bool execute(SOCKET clientSocket)
 							std::cerr << " send() failed." << std::endl;
 							break;
 						}
+						++currSequence;
 					}
 					else
 					{
