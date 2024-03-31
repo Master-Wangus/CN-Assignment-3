@@ -363,6 +363,7 @@ bool execute(SOCKET clientSocket)
 	DWORD timeout{}; // in milli
 	sockaddr_in clientAddr{}; // Client address UDP
 	int clientAddrSize = sizeof(clientAddr);
+	int sent = 0; // set sent packets to 0
 
 	while (true) //loop until client disconnects
 	{
@@ -394,6 +395,7 @@ bool execute(SOCKET clientSocket)
 						std::string filePacket = filePackets[currSequence].GetBuffer_htonl();
 						/// RETRANSMISSION
 						std::cout << "[TIMEOUT] Retransmitting Packet [" << currSequence <<  "] SessionID [" << threadSessionID << "]\n";
+						++sent;
 						const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 						if (bytesSent == SOCKET_ERROR)
 						{
@@ -407,6 +409,7 @@ bool execute(SOCKET clientSocket)
 					{
 						// Tell the client that the download is complete
 						std::string endPacket = Packet::GetEndPacket();
+						++sent;
 						const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 						if (bytesSent == SOCKET_ERROR)
 						{
@@ -418,6 +421,8 @@ bool execute(SOCKET clientSocket)
 						currSequence = 0;
 						timeout = 0;						
 						filePackets.clear(); // Reset the download Packets
+						std::cout << "Packets Sent in Total: " << sent << std::endl;
+						sent = 0;
 						std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 					}
 					continue;
@@ -457,6 +462,7 @@ bool execute(SOCKET clientSocket)
 					/// RETRANSMISSION
 					std::cout << "Retransmitting Packet [" << currSequence << "] SessionID [" << threadSessionID << "]\n";
 
+					++sent;
 					const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 					if (bytesSent == SOCKET_ERROR)
 					{
@@ -478,6 +484,7 @@ bool execute(SOCKET clientSocket)
 					continue;
 				}
 				std::string filePacket = filePackets[index].GetBuffer_htonl();
+				++sent;
 				const int bytesSent = sendto(udpSocket, filePacket.c_str(), static_cast<int>(filePacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 				if (bytesSent == SOCKET_ERROR)
 				{
@@ -495,6 +502,7 @@ bool execute(SOCKET clientSocket)
 			{
 				// Tell the client that the download is complete
 				std::string endPacket = Packet::GetEndPacket();
+				++sent;
 				const int bytesSent = sendto(udpSocket, endPacket.c_str(), static_cast<int>(endPacket.size()), 0, (sockaddr*)&clientAddr, clientAddrSize);
 				if (bytesSent == SOCKET_ERROR)
 				{
@@ -505,7 +513,8 @@ bool execute(SOCKET clientSocket)
 				timeout = 0;
 				index = 0;
 				currSequence = 0;
-				std::cout << "Packets Sent in Total: " << filePackets.size() << std::endl;
+				std::cout << "Packets Sent in Total: " << sent << std::endl;
+				sent = 0;
 				filePackets.clear(); // Reset the download Packets
 				std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 			}

@@ -360,7 +360,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 				u_short portNum = Utils::StringTo_ntohs(text.substr(5, 2));
 				u_long sessionID = Utils::StringTo_ntohl(text.substr(7, 4)); // session id
 				std::string fileLength = text.substr(11); // file length? brief never specify btyes
-
+				int recvied = 0;
 				//connect to server (optional)
 				struct sockaddr_in serverAddress;
 				(void)memset(&serverAddress, 0, sizeof(serverAddress));
@@ -426,11 +426,13 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 						
 						if (text[0] == static_cast<u_char>(FLGID::FIN))
 						{
+							++recvied;
 							std::cout << "End packet recieved\n";
 							break;
 						}
 						else if (text[0] == static_cast<u_char>(FLGID::FILE))
 						{
+							++recvied;
 							Packet filePacket = Packet::DecodePacket_ntohl(text);
 
 							/// RESEND ACKS in the event of packet loss
@@ -481,7 +483,7 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 					}
 				}
 				std::cout << "Download complete\n";
-				std::cout << "Packets Received in Total: " << recievedPackets.size() << std::endl;
+				std::cout << "Packets Received in Total: " << recvied << std::endl;
 				UnpackToFile(recievedPackets, filePath);
 				std::cout << "==========RECV END==========" << std::endl;
 				continue;
