@@ -20,7 +20,7 @@ prior written consent of DigiPen Institute of Technology is prohibited.
 #include <Windows.h>
 #include <filesystem>
 
-#define PACKET_SIZE size_t(1000)
+#define PACKET_SIZE size_t(30000)
 
 enum class FLGID
 {

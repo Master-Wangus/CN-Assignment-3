@@ -480,8 +480,9 @@ void receive(SOCKET TCPsocket, SOCKET UDPsocket) {
 						}
 					}
 				}
-				UnpackToFile(recievedPackets, filePath);
 				std::cout << "Download complete\n";
+				std::cout << "Packets Received in Total: " << recievedPackets.size() << std::endl;
+				UnpackToFile(recievedPackets, filePath);
 				std::cout << "==========RECV END==========" << std::endl;
 				continue;
 			}

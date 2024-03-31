@@ -416,7 +416,7 @@ bool execute(SOCKET clientSocket)
 
 						index = 0;
 						currSequence = 0;
-						timeout = 0;
+						timeout = 0;						
 						filePackets.clear(); // Reset the download Packets
 						std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 					}
@@ -505,6 +505,7 @@ bool execute(SOCKET clientSocket)
 				timeout = 0;
 				index = 0;
 				currSequence = 0;
+				std::cout << "Packets Sent in Total: " << filePackets.size() << std::endl;
 				filePackets.clear(); // Reset the download Packets
 				std::cout << "==========DOWNLOAD[" << threadSessionID << "] END==========" << std::endl;
 			}
