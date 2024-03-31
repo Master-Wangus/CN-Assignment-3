@@ -113,7 +113,7 @@ Packet Packet::DecodePacket_ntohl(const std::string& networkPacketString)
 		ULONG DataLength = Utils::StringTo_ntohl(networkPacketString.substr(13, sizeof(ULONG)));
 		std::string Data = networkPacketString.substr(17);
 
-		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data.c_str());
+		return Packet(SessionID, SequenceNo, FileOffset, DataLength, Data);
 	}
 	else
 	{
@@ -199,7 +199,7 @@ void AppendPacketToFile(const Packet& packet, const std::filesystem::path filePa
 {
 	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
 
-	outputFile.write(packet.Data.c_str(), packet.DataLength);
+	outputFile.write(packet.Data.data(), packet.DataLength);
 
 	outputFile.close();
 
@@ -215,12 +215,12 @@ void AppendPacketToFile(const Packet& packet, const std::filesystem::path filePa
 std::vector<ULONG> UnpackToFile(const std::vector<Packet>& packetVector, const std::filesystem::path filePath)
 {
 	std::vector<ULONG> segmentIDs;
-	std::ofstream outputFile(filePath, std::ios::binary | std::ios::app);
+	std::ofstream outputFile(filePath, std::ios::binary | std::ios::trunc);
 	if (packetVector.begin()->SequenceNo == 0) outputFile.clear();
 
 	for (ULONG segmentID{}; segmentID < packetVector.size(); ++segmentID)
 	{
-		outputFile.write(packetVector[segmentID].Data.c_str(), packetVector[segmentID].DataLength);
+		outputFile.write(packetVector[segmentID].Data.data(), packetVector[segmentID].DataLength);
 	}
 	outputFile.close();
 
